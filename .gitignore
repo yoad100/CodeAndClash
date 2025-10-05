@@ -1,0 +1,13 @@
+# Node
+node_modules/
+dist/
+
+# Environment files
+.env
+backend/.env
+
+# OS
+.DS_Store
+
+# Expo local state
+.expo/

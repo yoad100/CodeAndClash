@@ -1,0 +1,59 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+  backend1:
+    build: .
+    env_file:
+      - ./.env
+    environment:
+      - PORT=3000
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - JWT_SECRET=${JWT_SECRET:-secret}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:19006}
+      
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  backend2:
+    build: .
+    env_file:
+      - ./.env
+    environment:
+      - PORT=3001
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - JWT_SECRET=${JWT_SECRET:-secret}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:19006}
+      
+    ports:
+      - "3001:3001"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  worker:
+    build: .
+    command: ["node", "dist/src/scheduler.worker.js"]
+    env_file:
+      - ./.env
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://backend1:3000/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  # no top-level volumes configured; backend uses cloud Mongo via MONGODB_URI in backend/.env
