@@ -51,7 +51,13 @@ async function startNextQuestion(matchId: string) {
     logger.warn('question not found in DB: %s', qEntry.id);
     return;
   }
-  const q = { matchId, index: qi, question: { id: question._id, text: question.text, choices: question.choices } };
+  
+  // schedule individual player timeouts (15s each)
+  // First timeout at 15s, second at 30s (if first player times out)
+  const firstTimeout = Date.now() + 15000;
+  const secondTimeout = Date.now() + 30000;
+  
+  const q = { matchId, index: qi, question: { id: question._id, text: question.text, choices: question.choices }, questionEndAt: secondTimeout };
   logger.info('emitting questionStarted for match %s question %d', matchId, qi);
   // emit to room so cross-instance delivers to both players
   try {
@@ -75,12 +81,9 @@ async function startNextQuestion(matchId: string) {
     // ignore
   }
 
-  // schedule individual player timeouts (15s each)
-  // First timeout at 15s, second at 30s (if first player times out)
-  const firstTimeout = Date.now() + 15000;
-  const secondTimeout = Date.now() + 30000;
   await scheduleJob(matchId, qi, firstTimeout, 'playerTimeout');
   await scheduleJob(matchId, qi, secondTimeout, 'questionEnd');
+  try { await updateMatchState(matchId, { questionEndAt: secondTimeout }); } catch {}
 }
 
 // Redis-backed queues: queue:{subject}
@@ -270,8 +273,8 @@ export function initSocket(server: HttpServer) {
             const ms = await getMatchState(matchId);
             if (!ms) return;
             
-            const newFrozen = { ...(ms.frozen || {}) };
-            delete newFrozen[payload.playerId];
+            const newFrozen: any = { ...(ms.frozen || {}) };
+            delete newFrozen[String(payload.playerId)];
             await updateMatchState(matchId, { frozen: newFrozen });
             
             // Notify the match that player is unfrozen
@@ -297,22 +300,37 @@ export function initSocket(server: HttpServer) {
               logger.info('scheduler: skipping questionEnd for match %s qi=%d because currentQuestionIndex=%d', matchId, qi, ms.currentQuestionIndex);
               return;
             }
-            // emit questionEnded to the match room
-            (global as any).__io?.to(`match:${matchId}`).emit('questionEnded', { matchId, correctIndex });
-            // clear frozen states on question end to allow next question answering
-            try {
-              const cleared: any = {};
-              for (const k of Object.keys(ms.frozen || {})) cleared[k] = false;
-              await updateMatchState(matchId, { frozen: cleared });
-            } catch {}
-            // advance to next question if exists
-            if (ms && qi + 1 < (ms.questions || []).length) {
-              startNextQuestion(matchId);
+            const hadActivity = !!((ms as any).activity && (ms as any).activity[String(qi)]);
+            const match = await Match.findById(matchId);
+            if (!match) return;
+            if (!hadActivity) {
+              // No one interacted for 30s → end match for both with no winner
+              try {
+                (global as any).__io?.to(`match:${matchId}`).emit('matchEnded', { matchId, winnerId: null, players: (match.players || []).map((p:any)=>({ id: String(p.userId || p.id || ''), username: p.username, score: p.score || 0 })) });
+              } catch {}
+              await deleteMatchState(matchId);
+              try {
+                for (const p of (match.players as any[])) {
+                  if (p.userId) await redis.del(`usermatch:${String(p.userId)}`);
+                }
+              } catch {}
+              match.status = 'finished';
+              match.finishedAt = new Date();
+              match.result = { winnerId: null, scores: {} as any };
+              await match.save();
             } else {
-              // No more questions, end the match
-              const match = await Match.findById(matchId);
-              if (match) {
-                await endMatch(match, (global as any).__io);
+              // End just this question and continue
+              (global as any).__io?.to(`match:${matchId}`).emit('questionEnded', { matchId, correctIndex });
+              try {
+                const cleared: any = {};
+                for (const k of Object.keys(ms.frozen || {})) cleared[k] = false;
+                await updateMatchState(matchId, { frozen: cleared });
+              } catch {}
+              if (qi + 1 < (ms.questions || []).length) {
+                startNextQuestion(matchId);
+              } else {
+                const match2 = await Match.findById(matchId);
+                if (match2) await endMatch(match2, (global as any).__io);
               }
             }
           }
@@ -549,8 +567,58 @@ export function initSocket(server: HttpServer) {
   // check match state in Redis to ensure question is active and player isn't frozen
   const ms = await getMatchState(String(match._id));
   if (!ms) { socket.emit('error', { message: 'Match state not found' }); if (typeof ack === 'function') ack({ ok: false, error: 'Match state not found' }); return; }
+  // Proactively clear any expired freezes for all players
+  try {
+    const now = Date.now();
+    const frozenMap: any = ms.frozen || {};
+    const toClear: string[] = [];
+    for (const [pid, val] of Object.entries(frozenMap)) {
+      if (typeof val === 'number' && val <= now) {
+        toClear.push(String(pid));
+      }
+    }
+    if (toClear.length > 0) {
+      const patched: any = { ...frozenMap };
+      for (const pid of toClear) delete patched[pid];
+      await updateMatchState(String(match._id), { frozen: patched });
+      try {
+        for (const pid of toClear) {
+          (global as any).__io?.to(`match:${String(match._id)}`).emit('playerUnfrozen', { matchId: String(match._id), playerId: pid });
+        }
+      } catch {}
+      // reflect clean for validation below
+      (ms as any).frozen = patched;
+    }
+  } catch {}
   if (ms.currentQuestionIndex !== questionIndex) { socket.emit('error', { message: 'Question not active' }); if (typeof ack === 'function') ack({ ok: false, error: 'Question not active' }); return; }
-  if (ms.frozen && ms.frozen[String(playerId)]) { socket.emit('error', { message: 'You are frozen' }); if (typeof ack === 'function') ack({ ok: false, error: 'You are frozen' }); return; }
+  // Mark activity for this question (someone interacted)
+  try {
+    const act = { ...((ms as any).activity || {}) } as Record<string, boolean>;
+    act[String(questionIndex)] = true;
+    await updateMatchState(String(match._id), { activity: act });
+  } catch {}
+  // Respect numeric freeze-until timestamps; clear stale entries
+  if (ms.frozen) {
+    const fv = (ms.frozen as any)[String(playerId)];
+    if (typeof fv === 'number') {
+      if (fv > Date.now()) {
+        socket.emit('error', { message: 'You are frozen' });
+        if (typeof ack === 'function') ack({ ok: false, error: 'You are frozen' });
+        return;
+      } else {
+        // stale freeze, clear it
+        try {
+          const patched = { ...(ms.frozen as any) };
+          delete patched[String(playerId)];
+          await updateMatchState(String(match._id), { frozen: patched });
+        } catch {}
+      }
+    } else if (fv) {
+      socket.emit('error', { message: 'You are frozen' });
+      if (typeof ack === 'function') ack({ ok: false, error: 'You are frozen' });
+      return;
+    }
+  }
         logger.info('match state check passed: currentQuestionIndex=%d frozen=%o', ms.currentQuestionIndex, ms.frozen);
 
   // Update participants list to include current socket id (handles reconnections)
@@ -636,11 +704,19 @@ export function initSocket(server: HttpServer) {
             // notify both players of wrong answer (emit first for immediate UI feedback)
             logger.info('emitting answerResult (wrong) to match:%s', match._id);
             logger.info('sockets in room match:%s: %o', match._id, Array.from(io.sockets.adapter.rooms.get(`match:${match._id}`) || []));
-            io.to(`match:${match._id}`).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex });
+            const now = Date.now();
+            let qEnd = now + 30000;
+            try {
+              const msState = await getMatchState(String(match._id));
+              if (msState && (msState as any).questionEndAt) qEnd = (msState as any).questionEndAt;
+            } catch {}
+            const unfreezeTime = Math.min(now + 15000, qEnd);
+            // Inform clients about the freeze timing
+            io.to(`match:${match._id}`).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex, unfreezeTime });
             try {
               const participants: string[] = Array.isArray(ms.participants) ? ms.participants : [];
               for (const sid of participants) {
-                try { io.to(sid).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex }); } catch {}
+                try { io.to(sid).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex, unfreezeTime }); } catch {}
               }
             } catch {}
             logger.info('answerResult emission completed');
@@ -651,104 +727,38 @@ export function initSocket(server: HttpServer) {
             await match.save();
             logger.info('Match saved successfully after wrong answer');
 
-            // Early guard: if another player is already frozen, do NOT freeze this player.
-            // Instead, unfreeze everyone immediately to avoid double-freeze deadlocks.
-            try {
-              const preMs = await getMatchState(String(match._id));
-              const preFrozenEntries = Object.entries(preMs?.frozen || {});
-              const someoneElseFrozen = preFrozenEntries.some(([pid, val]) => pid !== String(playerId) && !!val);
-              if (someoneElseFrozen) {
-                logger.info('Detected existing frozen opponent on wrong answer — clearing all freezes now (early guard)');
-                await updateMatchState(String(match._id), { frozen: {} });
-                try { await cancelJobs(String(match._id), questionIndex, 'unfreeze'); } catch {}
-                // Previously frozen opponent(s) plus current player
-                const toUnfreezeIds = Array.from(new Set(preFrozenEntries.filter(([, v]) => !!v).map(([k]) => String(k)).concat([String(playerId)])));
-                // room emits
-                for (const pid of toUnfreezeIds) {
-                  try {
-                    io.to(`match:${match._id}`).emit('playerUnfrozen', { matchId: String(match._id), playerId: pid });
-                    io.to(`match:${match._id}`).emit('answerResult', { matchId: String(match._id), playerId: pid, correct: false, freeze: false, answerIndex: -1, questionIndex });
-                  } catch {}
-                }
-                // per-socket fallback
-                try {
-                  const msNow = await getMatchState(String(match._id));
-                  const participants: string[] = Array.isArray(msNow?.participants) ? msNow!.participants : [];
-                  for (const sid of participants) {
-                    for (const pid of toUnfreezeIds) {
-                      try {
-                        io.to(sid).emit('playerUnfrozen', { matchId: String(match._id), playerId: pid });
-                        io.to(sid).emit('answerResult', { matchId: String(match._id), playerId: pid, correct: false, freeze: false, answerIndex: -1, questionIndex });
-                      } catch {}
-                    }
-                  }
-                } catch {}
-                // Skip freezing/scheduling since we've unfrozen all
-                return;
-              }
-            } catch (e) {
-              logger.warn('early no-double-freeze guard failed: %o', e);
-            }
-            
             // freeze this player for 15 seconds
             logger.info('About to update match state with frozen player...');
             // Freeze only the wrong-answer player; keep others' frozen states as-is
-            const newFrozen = { ...(ms.frozen || {}) } as Record<string, boolean>;
-            newFrozen[String(playerId)] = true;
+            const newFrozen = { ...(ms.frozen || {}) } as Record<string, number>;
+            newFrozen[String(playerId)] = unfreezeTime;
             await updateMatchState(String(match._id), { frozen: newFrozen });
             logger.info('Match state updated with frozen player');
 
-            // Fallback: if all players are frozen now, immediately unfreeze everyone to avoid deadlock
-            try {
-              const msAfter = await getMatchState(String(match._id));
-              const frozenEntries = Object.entries(msAfter?.frozen || {});
-              const frozenTrueCount = frozenEntries.filter(([, v]) => !!v).length;
-              const playersCount = Array.isArray(match.players) ? match.players.length : 2;
-              if (playersCount > 0 && frozenTrueCount >= playersCount) {
-                logger.info('All players frozen for match %s q=%d — clearing freezes (fallback)', String(match._id), questionIndex);
-                await updateMatchState(String(match._id), { frozen: {} });
-                try { await cancelJobs(String(match._id), questionIndex, 'unfreeze'); } catch {}
-                const toUnfreezeIds = frozenEntries.map(([k]) => String(k));
-                for (const pid of toUnfreezeIds) {
-                  try {
-                    io.to(`match:${match._id}`).emit('playerUnfrozen', { matchId: String(match._id), playerId: pid });
-                    io.to(`match:${match._id}`).emit('answerResult', { matchId: String(match._id), playerId: pid, correct: false, freeze: false, answerIndex: -1, questionIndex });
-                  } catch {}
-                }
-                // per-socket fallback
-                try {
-                  const msNow = await getMatchState(String(match._id));
-                  const participants: string[] = Array.isArray(msNow?.participants) ? msNow!.participants : [];
-                  for (const sid of participants) {
-                    for (const pid of toUnfreezeIds) {
-                      try {
-                        io.to(sid).emit('playerUnfrozen', { matchId: String(match._id), playerId: pid });
-                        io.to(sid).emit('answerResult', { matchId: String(match._id), playerId: pid, correct: false, freeze: false, answerIndex: -1, questionIndex });
-                      } catch {}
-                    }
-                  }
-                } catch {}
+            // Check if both players are now frozen
+            const allPlayerIds = (ms.userIds || []).filter((id: any) => id && String(id).trim());
+            const allFrozen = allPlayerIds.length > 0 && allPlayerIds.every((pid: any) => {
+              const freezeValue = newFrozen[String(pid)];
+              return typeof freezeValue === 'number' && freezeValue > Date.now();
+            });
+            
+            if (allFrozen && allPlayerIds.length === 2) {
+              // Both players are frozen - unfreeze both immediately and let them continue
+              logger.info('Both players frozen, unfreezing both immediately');
+              const unfrozenState: any = {};
+              for (const pid of allPlayerIds) {
+                unfrozenState[String(pid)] = false;
               }
-            } catch (e) {
-              logger.warn('all-frozen fallback check failed: %o', e);
+              await updateMatchState(String(match._id), { frozen: unfrozenState });
+              
+              // Notify both players they are unfrozen
+              for (const pid of allPlayerIds) {
+                (global as any).__io?.to(`match:${String(match._id)}`).emit('playerUnfrozen', { matchId: String(match._id), playerId: pid });
+              }
+            } else {
+              // At least one player is still active - schedule individual unfreeze
+              await scheduleJob(String(match._id), questionIndex, unfreezeTime, 'unfreeze', { playerId: String(playerId) });
             }
-            
-            // Cancel only the questionEnd job so other players' unfreeze jobs remain
-            logger.info('About to cancel existing questionEnd job...');
-            await cancelJobs(String(match._id), questionIndex, 'questionEnd');
-            logger.info('Existing questionEnd job cancelled');
-            
-            // Schedule unfreeze after 15 seconds
-            logger.info('About to schedule unfreeze job...');
-            const unfreezeTime = Date.now() + 15000;
-            await scheduleJob(String(match._id), questionIndex, unfreezeTime, 'unfreeze', { playerId });
-            logger.info('Unfreeze job scheduled');
-            
-            // Schedule question end after 30 seconds from now (giving opponent full time)
-            logger.info('About to schedule question end job...');
-            const newQuestionEndTime = Date.now() + 30000;
-            await scheduleJob(String(match._id), questionIndex, newQuestionEndTime, 'questionEnd');
-            logger.info('Question end job scheduled');
 
             // Historical double-wrong unfreeze removed — early guard and all-frozen fallback prevent deadlocks
           } catch (wrongAnswerError) {
@@ -798,6 +808,37 @@ export function initSocket(server: HttpServer) {
         logger.info('cancelSearch removed any queued entries for socket %s uid=%s gid=%s', socket.id, uid, gid);
       } catch (e) {
         logger.warn('cancelSearch error: %o', e);
+      }
+    });
+
+    socket.on('idleTimeout', async (data: any) => {
+      try {
+        const uid = socketUser?.sub ? String(socketUser.sub) : undefined;
+        if (!uid || !data?.matchId) return;
+        
+        const match = await Match.findById(data.matchId);
+        if (!match || match.status === 'finished') return;
+        
+        logger.info('Idle timeout received for match %s by user %s', data.matchId, uid);
+        
+        // End the match due to idle timeout (draw)
+        await endMatch(match, io);
+      } catch (e) {
+        logger.warn('idleTimeout handler error: %o', e);
+      }
+    });
+
+    socket.on('getFreezeState', async (data: any) => {
+      try {
+        if (!data?.matchId) return;
+        
+        const ms = await getMatchState(String(data.matchId));
+        if (ms && ms.frozen) {
+          logger.info('Sending freeze state sync for match %s: %o', data.matchId, ms.frozen);
+          socket.emit('freezeStateSync', { matchId: data.matchId, frozen: ms.frozen });
+        }
+      } catch (e) {
+        logger.warn('getFreezeState handler error: %o', e);
       }
     });
 
