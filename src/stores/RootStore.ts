@@ -17,6 +17,7 @@ export class RootStore {
     this.uiStore = new UIStore();
     
     // Set rootStore references
+    this.authStore.rootStore = this;
     this.matchStore.rootStore = this;
     socketService.setRootStore(this);
   }

@@ -12,6 +12,13 @@ export class UserStore {
     makeAutoObservable(this);
   }
 
+  setUser(userData: User): void {
+    runInAction(() => {
+      this.user = userData;
+      console.log('👤 UserStore: User data set:', userData?.username);
+    });
+  }
+
   async fetchUserProfile(): Promise<void> {
     this.isLoading = true;
     this.error = null;
@@ -74,5 +81,14 @@ export class UserStore {
 
   get userRating(): number {
     return this.user?.rating ?? 1000;
+  }
+
+  clearUserData(): void {
+    runInAction(() => {
+      this.user = null;
+      this.leaderboard = [];
+      this.error = null;
+      this.isLoading = false;
+    });
   }
 }

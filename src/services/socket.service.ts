@@ -84,7 +84,10 @@ class SocketService {
         const msg = (payload && payload.message) || 'Socket error';
         console.warn('[socket] server error event', payload);
         this.rootStoreRef?.matchStore?.debugPushEvent?.('serverError', payload);
-        this.rootStoreRef?.uiStore?.showToast?.(msg, 'error');
+        // Don't show toast for freeze errors - they're handled by UI freeze state
+        if (msg !== 'You are frozen') {
+          this.rootStoreRef?.uiStore?.showToast?.(msg, 'error');
+        }
       } catch (e) {
         // ignore
       }
@@ -287,13 +290,22 @@ class SocketService {
       try {
         // feed into matchStore debug overlay if available
         this.rootStoreRef?.matchStore?.debugPushEvent?.('submitAnswerAck', ack);
-      } catch {}
-      if (!ack || ack.ok !== true) {
-        try {
+        
+        if (!ack || ack.ok !== true) {
           const msg = (ack && ack.error) || 'Submit failed';
-          this.rootStoreRef?.uiStore?.showToast?.(msg, 'error');
-        } catch {}
-      }
+          
+          // If server says we're frozen, sync client freeze state
+          if (msg === 'You are frozen') {
+            console.log('🚨 Server says frozen - requesting freeze state sync');
+            this.rootStoreRef?.matchStore?.debugPushEvent?.('freezeRejection', { playerId: this.rootStoreRef?.authStore?.currentUser?.id });
+            
+            // Request freeze state sync from server
+            this.rootStoreRef?.matchStore?.syncFreezeState?.();
+          } else {
+            this.rootStoreRef?.uiStore?.showToast?.(msg, 'error');
+          }
+        }
+      } catch {}
     });
   }
 
@@ -331,6 +343,10 @@ class SocketService {
 
   leaveMatch() {
     this.socket?.emit('leaveMatch');
+  }
+
+  emit(event: string, data?: any) {
+    this.socket?.emit(event, data);
   }
 }
 

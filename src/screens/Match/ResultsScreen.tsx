@@ -74,8 +74,6 @@ export const ResultsScreen: React.FC = observer(() => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Dimmed backdrop to emphasize popup */}
-      <Animated.View style={[styles.backdrop, { opacity: fadeAnim }]} />
       <Animated.View style={[styles.card, { transform: [{ scale: popAnim }] }]}>
         <Text style={styles.emoji}>
           {winner ? (winner.id === myId ? '🏆' : '😅') : '🤝'}
@@ -103,8 +101,23 @@ export const ResultsScreen: React.FC = observer(() => {
         </View>
 
         <View style={styles.actions}>
-          <ArcadeButton title="Play Again" onPress={() => { matchStore.resetMatch(); matchStore.startSearch(); (navigation as any).navigate('MatchLobby'); }} />
-          <ArcadeButton title="Home" onPress={() => { matchStore.resetMatch(); (navigation as any).navigate('Main'); }} variant="ghost" style={{ marginLeft: 12 }} />
+          <ArcadeButton title="Play Again" onPress={() => { 
+            matchStore.resetMatch(); 
+            matchStore.startSearch(); 
+            (navigation as any).navigate('MatchLobby'); 
+          }} />
+          <ArcadeButton 
+            title="Home" 
+            onPress={() => { 
+              matchStore.resetMatch(); 
+              (navigation as any).navigate('Main', { 
+                screen: 'Home', 
+                params: { screen: 'HomeRoot' } 
+              }); 
+            }} 
+            variant="ghost" 
+            style={{ marginLeft: 12 }} 
+          />
         </View>
         {showConfetti && <ConfettiBurst onComplete={() => setShowConfetti(false)} />}
       </Animated.View>
@@ -113,7 +126,7 @@ export const ResultsScreen: React.FC = observer(() => {
 });
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: COLORS.background, justifyContent: 'center', alignItems: 'center' },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#00000090' },
   card: { width: '88%', maxWidth: 520, backgroundColor: COLORS.cardBackground, borderRadius: 16, paddingVertical: 20, paddingHorizontal: 16, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
   emoji: { fontSize: 48, marginBottom: 4 },

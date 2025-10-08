@@ -1,4 +1,5 @@
 import React from 'react';
+import { observer } from 'mobx-react-lite';
 import { useNavigation } from '@react-navigation/native';
 // guard haptics import - may not be installed in this environment
 let Haptics: any = null;
@@ -14,8 +15,9 @@ import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
 import { socketService } from '../../services/socket.service';
 import { VsSplash } from '../../components/match/VsSplash';
+import { SnowBlizzard } from '../../components/match/SnowBlizzard';
 
-export const MatchScreen: React.FC = () => {
+const MatchScreenComponent: React.FC = () => {
   const { matchStore, uiStore } = rootStore;
   const navigation = useNavigation();
   const q = matchStore.currentQuestion;
@@ -37,7 +39,15 @@ export const MatchScreen: React.FC = () => {
   const [showVs, setShowVs] = React.useState(true);
 
   const onChoose = (index: number) => {
-    if (!canAnswer) return;
+    // Race condition bypass: If I'm not frozen but canAnswer is false,
+    // still allow the click and let submitAnswer handle the retry logic
+    const myUserId = matchStore.myUserId;
+    const isFrozen = myUserId ? matchStore.frozen[myUserId] : true;
+    
+    if (!canAnswer && isFrozen) {
+      return; // Only block if actually frozen
+    }
+    
     // prevent re-choosing an eliminated (wrong) choice
     if (matchStore.disabledChoicesForCurrentQuestion.has(index)) return;
     // micro spark effect
@@ -137,9 +147,9 @@ export const MatchScreen: React.FC = () => {
     return () => { mounted = false; clearInterval(iv); };
   }, []);
 
-  // Low timer pulse on the whole question card
+  // Low timer pulse on the whole question card when idle timer gets urgent
   React.useEffect(() => {
-    const urgent = matchStore.timeRemaining <= 5 && matchStore.timeRemaining > 0;
+    const urgent = matchStore.timeRemaining <= 10 && matchStore.timeRemaining > 0;
     if (urgent) {
       if (!urgentPulseRef.current) {
         urgentPulseRef.current = Animated.loop(
@@ -158,7 +168,7 @@ export const MatchScreen: React.FC = () => {
       cardPulse.setValue(1);
     }
     return () => {
-      if (urgentPulseRef.current && (matchStore.timeRemaining <= 0 || matchStore.timeRemaining > 5)) {
+      if (urgentPulseRef.current && (matchStore.timeRemaining <= 0 || matchStore.timeRemaining > 10)) {
         urgentPulseRef.current.stop();
         urgentPulseRef.current = null;
       }
@@ -271,12 +281,14 @@ export const MatchScreen: React.FC = () => {
             <TouchableOpacity
               style={[
                 styles.choice,
-                !canAnswer && styles.choiceDisabled,
+                matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) && styles.choiceDisabled,
                 matchStore.disabledChoicesForCurrentQuestion.has(idx) && styles.choiceEliminated,
                 pressedIndex === idx && styles.choicePressed,
                 // Add generic turn status early so result highlights can override
-                canAnswer && matchStore.myPlayerStatus === 'can-answer' && styles.choiceAvailable,
-                !canAnswer && matchStore.myPlayerStatus === 'frozen' && styles.choiceFrozen,
+                !matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) && matchStore.myPlayerStatus === 'can-answer' && styles.choiceAvailable,
+                matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) && matchStore.myPlayerStatus === 'frozen' && styles.choiceFrozen,
+                // Show already answered state
+                matchStore.answeredQuestions.has(matchStore.currentQuestionIndex) && styles.choiceDisabled,
                 // Show my answer result (correct only on the picked choice)
                 lastResult && lastResult.playerId === matchStore.myUserId && lastResult.correct && lastResult.questionIndex === matchStore.currentQuestionIndex && lastResult.answerIndex === idx && styles.choiceCorrect,
                 lastResult && lastResult.playerId === matchStore.myUserId && !lastResult.correct && lastResult.answerIndex === idx && lastResult.questionIndex === matchStore.currentQuestionIndex && styles.choiceIncorrect,
@@ -284,7 +296,7 @@ export const MatchScreen: React.FC = () => {
                 lastResult && lastResult.playerId !== matchStore.myUserId && lastResult.answerIndex === idx && lastResult.questionIndex === matchStore.currentQuestionIndex && (lastResult.correct ? styles.choiceOpponentCorrect : styles.choiceOpponentWrong),
               ]}
               onPress={() => onChoose(idx)}
-              disabled={!canAnswer || matchStore.disabledChoicesForCurrentQuestion.has(idx)}
+              disabled={matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) || matchStore.disabledChoicesForCurrentQuestion.has(idx)}
               accessibilityRole="button"
               accessibilityLabel={`Choice ${idx + 1}: ${c}`}
             >
@@ -332,8 +344,8 @@ export const MatchScreen: React.FC = () => {
                 styles.choiceText,
                 (pressedIndex === idx || (lastResult && lastResult.playerId === matchStore.myUserId && lastResult.questionIndex === matchStore.currentQuestionIndex && lastResult.answerIndex === idx)) ? { color: COLORS.white } : undefined,
                 // Adjust text color based on choice state
-                canAnswer && matchStore.myPlayerStatus === 'can-answer' ? { color: COLORS.text } : undefined,
-                !canAnswer && matchStore.myPlayerStatus === 'frozen' ? { color: COLORS.textSecondary } : undefined,
+                !matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) && matchStore.myPlayerStatus === 'can-answer' ? { color: COLORS.text } : undefined,
+                matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) ? { color: COLORS.textSecondary } : undefined,
                 matchStore.disabledChoicesForCurrentQuestion.has(idx) ? { color: COLORS.textSecondary } : undefined,
                 matchStore.disabledChoicesForCurrentQuestion.has(idx) ? { textDecorationLine: 'line-through' } : undefined,
               ]}>{c}</Text>
@@ -346,12 +358,12 @@ export const MatchScreen: React.FC = () => {
         <View style={styles.timerContainer}>
           <Text style={[
             styles.timer, 
-            matchStore.timeRemaining <= 5 && styles.timerUrgent
+            matchStore.timeRemaining <= 10 && styles.timerUrgent
           ]}>
-            {matchStore.timeRemaining <= 5 ? '🔥 ' : ''}Time: {matchStore.timeRemaining}s
+            {matchStore.timeRemaining <= 10 ? '⚠️ ' : ''}Match idle: {matchStore.timeRemaining}s
           </Text>
-          {matchStore.timeRemaining <= 5 && matchStore.canSubmitAnswer && (
-            <Text style={styles.urgentMessage}>Hurry up!</Text>
+          {matchStore.timeRemaining <= 10 && (
+            <Text style={styles.urgentMessage}>Match will end soon!</Text>
           )}
         </View>
 
@@ -373,21 +385,35 @@ export const MatchScreen: React.FC = () => {
 
       {/* Debug overlay */}
       {true && (
-        <View style={{ position: 'absolute', bottom: 4, left: 4, right: 4, backgroundColor: '#00000080', padding: 6, borderRadius: 6 }}>
-          <Text style={{ color: '#fff', fontSize: 10 }}>debug events (latest first):</Text>
-          {matchStore.debugLastEvents.map((e, idx) => (
-            <Text key={idx} style={{ color: '#ddd', fontSize: 10 }} numberOfLines={1}>
-              [{new Date(e.ts).toLocaleTimeString()}] {e.event} {JSON.stringify(e.payload)}
-            </Text>
-          ))}
-          <Text style={{ color: '#fff', fontSize: 10 }}>
-            state qIdx={matchStore.currentQuestionIndex} time={matchStore.timeRemaining}s frozen={JSON.stringify(matchStore.frozen)} myId={matchStore.myUserId}
+        <View style={{ position: 'absolute', bottom: 4, left: 4, right: 4, backgroundColor: '#00000090', padding: 8, borderRadius: 6 }}>
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>DEBUG FREEZE STATE:</Text>
+          <Text style={{ color: '#fff', fontSize: 11 }}>
+            Frozen: {JSON.stringify(matchStore.frozen)}
+          </Text>
+          <Text style={{ color: '#fff', fontSize: 11 }}>
+            My Status: {matchStore.myPlayerStatus} | Opp Status: {matchStore.opponentPlayerStatus}
+          </Text>
+          <Text style={{ color: '#fff', fontSize: 11 }}>
+            My Countdown: {matchStore.myFreezeCountdown} | Opp Countdown: {matchStore.opponentFreezeCountdown}
+          </Text>
+          <Text style={{ color: '#fff', fontSize: 11 }}>
+            Can Answer: {matchStore.canSubmitAnswer ? 'YES' : 'NO'} | Timer: {matchStore.timeRemaining}s
+          </Text>
+          <Text style={{ color: '#ddd', fontSize: 10 }} numberOfLines={2}>
+            Last Events: {matchStore.debugLastEvents.slice(0,2).map(e => `${e.event}(${JSON.stringify(e.payload)})`).join(' | ')}
           </Text>
         </View>
+      )}
+      
+      {/* Snow Blizzard Freeze Effect */}
+      {matchStore.myFreezeCountdown && matchStore.myFreezeCountdown > 0 && (
+        <SnowBlizzard countdown={matchStore.myFreezeCountdown} />
       )}
     </SafeAreaView>
   );
 };
+
+export const MatchScreen = observer(MatchScreenComponent);
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
@@ -463,8 +489,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary + '10' 
   },
   choiceFrozen: { 
-    borderColor: COLORS.glowPink, 
-    backgroundColor: COLORS.error + '10' 
+    borderColor: COLORS.error, 
+    backgroundColor: COLORS.error + '20',
+    opacity: 0.4
   },
   choiceActiveIndicator: {
     position: 'absolute',
@@ -487,6 +514,7 @@ const styles = StyleSheet.create({
   footer: { padding: 16, alignItems: 'center' },
   timerContainer: { alignItems: 'center', marginBottom: 8 },
   timer: { fontSize: 18, color: COLORS.textSecondary, fontWeight: '600' },
+  idleTimer: { fontSize: 14, color: COLORS.textSecondary, marginTop: 2, fontWeight: '600' },
   timerUrgent: { color: COLORS.error, fontSize: 20, fontWeight: 'bold' },
   urgentMessage: { fontSize: 12, color: COLORS.error, marginTop: 4, fontWeight: '600' },
   queueHint: { fontSize: 12, color: COLORS.warning, textAlign: 'center', marginBottom: 4 },

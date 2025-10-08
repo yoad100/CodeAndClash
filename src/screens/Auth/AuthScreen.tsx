@@ -12,8 +12,10 @@ import { observer } from 'mobx-react-lite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
+import { OAuthButtonGroup } from '../../components/auth/OAuthButton';
 import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
+import { useOAuth } from '../../hooks/useOAuth';
 
 export const AuthScreen: React.FC = observer(() => {
   const [isLogin, setIsLogin] = useState(true);
@@ -23,6 +25,14 @@ export const AuthScreen: React.FC = observer(() => {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const { authStore, uiStore } = rootStore;
+  
+  // OAuth hook for Google and GitHub authentication
+  const {
+    googleState,
+    githubState,
+    authenticateWithGoogle,
+    authenticateWithGitHub,
+  } = useOAuth();
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -64,11 +74,14 @@ export const AuthScreen: React.FC = observer(() => {
 
   const handleOAuthLogin = async (provider: 'google' | 'github') => {
     try {
-      // Implementation depends on expo-auth-session
-      uiStore.showToast(`${provider} login coming soon`, 'info');
-      // await authStore.oauthLogin(provider, token);
+      if (provider === 'google') {
+        await authenticateWithGoogle();
+      } else if (provider === 'github') {
+        await authenticateWithGitHub();
+      }
     } catch (error: any) {
-      uiStore.showToast(error.message || 'OAuth login failed', 'error');
+      console.error(`OAuth ${provider} error:`, error);
+      // Error handling is done in the useOAuth hook
     }
   };
 
@@ -133,20 +146,13 @@ export const AuthScreen: React.FC = observer(() => {
               <View style={styles.dividerLine} />
             </View>
 
-            <View style={styles.oauthButtons}>
-              <Button
-                title="Google"
-                onPress={() => handleOAuthLogin('google')}
-                variant="outline"
-                style={styles.oauthButton}
-              />
-              <Button
-                title="GitHub"
-                onPress={() => handleOAuthLogin('github')}
-                variant="outline"
-                style={styles.oauthButton}
-              />
-            </View>
+            <OAuthButtonGroup
+              onGooglePress={() => handleOAuthLogin('google')}
+              onGitHubPress={() => handleOAuthLogin('github')}
+              googleLoading={googleState.loading}
+              githubLoading={githubState.loading}
+              disabled={authStore.isLoading}
+            />
 
             <TouchableOpacity
               onPress={() => {

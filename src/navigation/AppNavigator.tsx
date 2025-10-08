@@ -4,6 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { observer } from 'mobx-react-lite';
 import { Ionicons } from '@expo/vector-icons';
+import { TouchableOpacity, Alert, View, Text, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
 import { rootStore } from '../stores/RootStore';
 import { socketService } from '../services/socket.service';
@@ -39,13 +40,119 @@ const HomeStackNavigator: React.FC = () => {
   );
 };
 
-const MainTabs: React.FC = () => {
-  const { userStore, matchStore } = rootStore as any;
+const MainTabs: React.FC = observer(() => {
+  const { userStore, matchStore, authStore, uiStore } = rootStore as any;
   const [pendingTab, setPendingTab] = React.useState<string | null>(null);
   const [confirmVisible, setConfirmVisible] = React.useState(false);
   const nav = useNavigation<any>();
 
   const isInActiveMatch = !!(matchStore?.currentMatch && matchStore.currentMatch.status === 'active');
+  
+  const handleLogout = () => {
+    console.log('🚪 LOGOUT BUTTON CLICKED!');
+    
+    // Use a simple confirm for web, Alert for mobile
+    const confirmLogout = () => {
+      const doLogout = async () => {
+        try {
+          console.log('🔥 Starting logout process...');
+          if (!authStore || typeof authStore.logout !== 'function') {
+            console.error('❌ AuthStore or logout method not available');
+            return;
+          }
+          await authStore.logout();
+          console.log('✅ Logout completed successfully');
+        } catch (error) {
+          console.error('❌ Logout failed:', error);
+        }
+      };
+
+      // For web, use browser confirm
+      if (typeof globalThis !== 'undefined' && (globalThis as any).confirm) {
+        const confirmed = (globalThis as any).confirm('Are you sure you want to logout?');
+        if (confirmed) {
+          doLogout();
+        }
+      } else {
+        // Fallback to direct logout
+        doLogout();
+      }
+    };
+
+    confirmLogout();
+  };
+
+  // User Status Component for Navbar
+  const getUserStatus = () => {
+    if (isInActiveMatch) return { text: 'In Match', color: COLORS.success, icon: 'game-controller' };
+    if (matchStore.isSearching) return { text: 'Searching', color: COLORS.warning, icon: 'search' };
+    return { text: uiStore.connectionStatus || 'Online', color: COLORS.secondary, icon: 'checkmark-circle' };
+  };
+
+  const UserInfoHeader = () => {
+    const user = userStore.user;
+    console.log('🏠 UserInfoHeader render - user:', user ? 'exists' : 'null');
+    console.log('🏠 UserInfoHeader render - authStore.isAuthenticated:', authStore?.isAuthenticated);
+    
+    if (!user) return (
+      <TouchableOpacity
+        onPress={handleLogout}
+        style={navStyles.logoutOnlyButton}
+        accessibilityLabel="Logout"
+        accessibilityRole="button"
+        activeOpacity={0.7}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Ionicons name="log-out-outline" size={24} color={COLORS.error} />
+      </TouchableOpacity>
+    );
+
+    return (
+      <View style={navStyles.userInfoContainer}>
+        {/* User Avatar */}
+        <View style={navStyles.avatarContainer}>
+          {user.avatar ? (
+            <Image source={{ uri: user.avatar }} style={navStyles.avatar} />
+          ) : (
+            <View style={[navStyles.avatar, navStyles.avatarPlaceholder]}>
+              <Text style={navStyles.avatarText}>
+                {user.username?.charAt(0)?.toUpperCase() ?? 'U'}
+              </Text>
+            </View>
+          )}
+        </View>
+        
+        {/* User Details */}
+        <View style={navStyles.userDetails}>
+          <Text style={navStyles.username} numberOfLines={1}>
+            {user.username ?? 'Guest'}
+          </Text>
+          <Text style={navStyles.ratingText}>
+            Rating: {user.rating ?? '-'}
+            {user.isPremium && (
+              <Text> </Text>
+            )}
+            {user.isPremium && (
+              <Ionicons name="star" size={12} color={COLORS.warning} />
+            )}
+          </Text>
+        </View>
+        
+        {/* Logout Button */}
+        <TouchableOpacity
+          onPress={handleLogout}
+          style={navStyles.logoutButton}
+          accessibilityLabel="Logout"
+          accessibilityRole="button"
+          activeOpacity={0.7}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="log-out-outline" size={22} color={COLORS.error} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+  
   const requestLeaveMatch = (target: string) => {
     setPendingTab(target);
     setConfirmVisible(true);
@@ -113,6 +220,7 @@ const MainTabs: React.FC = () => {
             textShadowRadius: 8,
             textShadowOffset: { width: 0, height: 0 },
           },
+          headerRight: () => <UserInfoHeader />,
         }}
       >
         <Tab.Screen
@@ -123,7 +231,6 @@ const MainTabs: React.FC = () => {
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="home" size={size} color={color} />
             ),
-            headerShown: false,
           }}
           listeners={{
             tabPress: (e) => {
@@ -184,7 +291,7 @@ const MainTabs: React.FC = () => {
       />
     </React.Fragment>
   );
-};
+});
 
 export const AppNavigator: React.FC = observer(() => {
   const { authStore } = rootStore;
@@ -253,4 +360,69 @@ export const AppNavigator: React.FC = observer(() => {
       </Stack.Navigator>
     </NavigationContainer>
   );
+});
+
+// Navigation header styles
+const navStyles = StyleSheet.create({
+  userInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  avatarContainer: {
+    marginRight: 12,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  avatarPlaceholder: {
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  userDetails: {
+    flex: 1,
+    marginRight: 12,
+    minWidth: 100,
+  },
+  username: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  ratingText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoutButton: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 87, 87, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 87, 87, 0.3)',
+  },
+  logoutOnlyButton: {
+    marginRight: 16,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 87, 87, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 87, 87, 0.3)',
+  },
 });

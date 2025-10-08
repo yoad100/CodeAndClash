@@ -44,26 +44,6 @@ export const HomeScreen: React.FC = observer(() => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.profile}>
-          {userStore.user?.avatar ? (
-            <Image source={{ uri: userStore.user.avatar }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarText}>{userStore.user?.username?.charAt(0)?.toUpperCase() ?? 'U'}</Text>
-            </View>
-          )}
-          <View style={{ marginLeft: 12 }}>
-            <Text style={styles.username}>{userStore.user?.username ?? 'Guest'}</Text>
-            <Text style={styles.userMeta}>Rating: {userStore.user?.rating ?? '-'}</Text>
-          </View>
-        </View>
-
-        <View style={styles.statusRow}>
-          <Text style={styles.status}>Status: {uiStore.connectionStatus}</Text>
-          {queued > 0 && <Text style={styles.queued}>Queued: {queued}</Text>}
-        </View>
-      </View>
 
       <ScrollView
         style={styles.content}
@@ -105,17 +85,6 @@ export const HomeScreen: React.FC = observer(() => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { padding: 20, borderBottomColor: COLORS.border, borderBottomWidth: 1 },
-  profile: { flexDirection: 'row', alignItems: 'center' },
-  avatar: { width: 56, height: 56, borderRadius: 28 },
-  avatarShadow: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 4 },
-  avatarPlaceholder: { backgroundColor: COLORS.primary, justifyContent: 'center', alignItems: 'center' },
-  avatarText: { color: COLORS.white, fontWeight: '700' },
-  username: { fontSize: 18, fontWeight: '700', color: COLORS.text },
-  userMeta: { fontSize: 12, color: COLORS.textSecondary },
-  statusRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
-  status: { color: COLORS.textSecondary },
-  queued: { color: COLORS.warning },
   content: { flex: 1 },
   contentContainer: { padding: 20, alignItems: 'center', justifyContent: 'center', paddingBottom: 32 },
   primaryButton: { marginVertical: 16 },
