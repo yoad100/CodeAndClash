@@ -15,10 +15,10 @@ import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
 import { socketService } from '../../services/socket.service';
 import { VsSplash } from '../../components/match/VsSplash';
-import { SnowBlizzard } from '../../components/match/SnowBlizzard';
+import { FreezeOverlayMobile } from '../../components/fx/FreezeOverlayMobile';
 
 const MatchScreenComponent: React.FC = () => {
-  const { matchStore, uiStore } = rootStore;
+  const { matchStore, uiStore, userStore } = rootStore;
   const navigation = useNavigation();
   const q = matchStore.currentQuestion;
   // Allow answering based solely on game state; offline answers will be queued by socketService
@@ -174,6 +174,19 @@ const MatchScreenComponent: React.FC = () => {
       }
     };
   }, [matchStore.timeRemaining, matchStore.currentQuestionIndex]);
+  
+  // Debug freeze countdown
+  React.useEffect(() => {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('🧊 Freeze Debug:', {
+        myFreezeCountdown: matchStore.myFreezeCountdown,
+        myUserId: matchStore.myUserId,
+        freezeCountdowns: matchStore.freezeCountdowns,
+        frozen: matchStore.frozen
+      });
+    }
+  }, [matchStore.myFreezeCountdown]);
+  
   // Show VS splash only when entering the match for the first time
   React.useEffect(() => {
     if (matchStore.currentQuestionIndex === 0 && matchStore.currentMatch?.status === 'active') {
@@ -188,6 +201,15 @@ const MatchScreenComponent: React.FC = () => {
       try { (navigation as any).navigate('Results'); } catch (e) { /* ignore */ }
     }
   }, [matchStore.currentMatch?.status]);
+
+  const myFreezeCountdown = matchStore.myFreezeCountdown ?? 0;
+  const showFreezeOverlay = myFreezeCountdown > 0;
+  const freezeDuration = matchStore.myFreezeTotalDuration ?? undefined;
+  const freezePlayerName =
+    matchStore.myPlayer?.username ||
+    userStore?.user?.username ||
+    matchStore.currentMatch?.players?.find((p) => p.id === matchStore.myUserId)?.username ||
+    'You';
 
   if (!matchStore.currentMatch) {
     return (
@@ -325,8 +347,8 @@ const MatchScreenComponent: React.FC = () => {
 
               {/* eliminated choice badge */}
               {matchStore.disabledChoicesForCurrentQuestion.has(idx) && (
-                <View style={styles.eliminatedBadge} accessible accessibilityLabel="Eliminated choice">
-                  <Text style={styles.eliminatedBadgeText}>✖</Text>
+                <View style={styles.eliminatedRibbon} accessible accessibilityLabel="Eliminated choice">
+                  <Text style={styles.eliminatedRibbonText}>ELIMINATED</Text>
                 </View>
               )}
 
@@ -346,8 +368,7 @@ const MatchScreenComponent: React.FC = () => {
                 // Adjust text color based on choice state
                 !matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) && matchStore.myPlayerStatus === 'can-answer' ? { color: COLORS.text } : undefined,
                 matchStore.isAnswerDisabled(matchStore.currentQuestionIndex) ? { color: COLORS.textSecondary } : undefined,
-                matchStore.disabledChoicesForCurrentQuestion.has(idx) ? { color: COLORS.textSecondary } : undefined,
-                matchStore.disabledChoicesForCurrentQuestion.has(idx) ? { textDecorationLine: 'line-through' } : undefined,
+                matchStore.disabledChoicesForCurrentQuestion.has(idx) ? styles.choiceEliminatedText : undefined,
               ]}>{c}</Text>
             </TouchableOpacity>
           </Animated.View>
@@ -405,9 +426,13 @@ const MatchScreenComponent: React.FC = () => {
         </View>
       )}
       
-      {/* Snow Blizzard Freeze Effect */}
-      {matchStore.myFreezeCountdown && matchStore.myFreezeCountdown > 0 && (
-        <SnowBlizzard countdown={matchStore.myFreezeCountdown} />
+      {/* Freeze overlay with snowfall and countdown ring */}
+      {showFreezeOverlay && (
+        <FreezeOverlayMobile
+          timeLeft={myFreezeCountdown}
+          totalDuration={freezeDuration}
+          playerName={freezePlayerName}
+        />
       )}
     </SafeAreaView>
   );
@@ -480,7 +505,15 @@ const styles = StyleSheet.create({
   choicePressed: { backgroundColor: COLORS.primary, borderColor: COLORS.secondary },
   choiceCorrect: { backgroundColor: COLORS.success, borderColor: COLORS.success },
   choiceIncorrect: { backgroundColor: COLORS.error, borderColor: COLORS.glowPink },
-  choiceEliminated: { opacity: 0.5 },
+  choiceEliminated: { 
+    backgroundColor: 'rgba(248, 113, 113, 0.16)',
+    borderColor: '#dc2626',
+    shadowColor: '#f87171',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
   choiceOpponentWrong: { backgroundColor: COLORS.warning + '40', borderColor: COLORS.primary },
   choiceOpponentCorrect: { backgroundColor: COLORS.success + '30', borderColor: COLORS.secondary },
   choiceAvailable: { 
@@ -532,18 +565,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center' 
   },
   queuedBadgeText: { color: COLORS.white, fontSize: 12, lineHeight: 12 },
-  eliminatedBadge: {
+  eliminatedRibbon: {
     position: 'absolute',
-    top: 6,
-    left: 8,
-    backgroundColor: COLORS.error,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center'
+    top: -10,
+    right: -12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: '#dc2626',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    borderBottomLeftRadius: 10,
+    transform: [{ rotate: '6deg' }],
+    shadowColor: '#7f1d1d',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
   },
-  eliminatedBadgeText: { color: COLORS.white, fontSize: 12, lineHeight: 12 },
+  eliminatedRibbonText: {
+    color: '#fff5f5',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  choiceEliminatedText: {
+    color: '#fee2e2',
+    textDecorationLine: 'line-through',
+    textShadowColor: 'rgba(220,38,38,0.25)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 2,
+  },
   remainingChoices: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 },
 
   // spark micro effect overlay

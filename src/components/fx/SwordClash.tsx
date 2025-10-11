@@ -1,238 +1,346 @@
 import React from 'react';
-import { View, StyleSheet, Animated, Easing } from 'react-native';
+import { View, StyleSheet, Animated, Easing, Platform } from 'react-native';
 import { COLORS } from '../../constants/colors';
 import KatanaBlade from './KatanaBlade';
 
 type Props = {
   isActive?: boolean;
   size?: number;
-  // 'plus' => left 0°, right 90°; 'parallel' => both 0° (vertical)
   shape?: 'plus' | 'parallel';
 };
 
+const SPARK_VECTORS = [
+  { x: -0.52, y: -0.32, rotate: '-24deg', scale: 1.1 },
+  { x: 0.54, y: -0.24, rotate: '22deg', scale: 1.0 },
+  { x: -0.38, y: 0.32, rotate: '17deg', scale: 0.9 },
+  { x: 0.46, y: 0.28, rotate: '-18deg', scale: 0.95 },
+  { x: 0, y: -0.58, rotate: '0deg', scale: 0.8 },
+] as const;
+
 export const SwordClash: React.FC<Props> = ({ isActive = false, size = 24, shape = 'plus' }) => {
-  // Core motion values
-  const leftSword = React.useRef(new Animated.Value(0)).current; // 0=offscreen, 1=impact
-  const rightSword = React.useRef(new Animated.Value(0)).current; // 0=offscreen, 1=impact
-  const recoil = React.useRef(new Animated.Value(0)).current; // kept but damped for strict plus
-  const sparks = React.useRef(new Animated.Value(0)).current; // particle burst 0->1
-  const flash = React.useRef(new Animated.Value(0)).current; // impact flash 0->1
-  const glint = React.useRef(new Animated.Value(0)).current; // blade specular sweep 0->1
-  const glow = React.useRef(new Animated.Value(0)).current; // ambient aura
+  const isWeb = Platform.OS === 'web';
+  const approachValue = React.useRef(new Animated.Value(0)).current;
+  const impactValue = React.useRef(new Animated.Value(0)).current;
+  const shakeValue = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
+    let cycle: Animated.CompositeAnimation | null = null;
+
     if (isActive) {
-      // Main clash loop: approach -> impact (recoil+flash+sparks) -> retreat -> pause
-      const approach = Animated.parallel([
-        Animated.timing(leftSword, {
-          toValue: 1,
-          duration: 650,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(rightSword, {
-          toValue: 1,
-          duration: 650,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]);
+      const approachDuration = isWeb ? 780 : 700;
+      const impactRise = isWeb ? 210 : 190;
+      const impactFall = isWeb ? 360 : 320;
+      const retreatDuration = isWeb ? 620 : 560;
+      const postImpactPause = isWeb ? 320 : 300;
+      const resetPause = isWeb ? 720 : 660;
+
+      const approach = Animated.timing(approachValue, {
+        toValue: 1,
+        duration: approachDuration,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      });
 
       const impact = Animated.parallel([
-        // Minimal recoil to preserve strict cross shape
         Animated.sequence([
-          Animated.timing(recoil, { toValue: 1, duration: 40, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-          Animated.timing(recoil, { toValue: 0, duration: 60, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-          Animated.delay(120), // hold cross briefly
-        ]),
-        Animated.sequence([
-          Animated.timing(flash, {
+          Animated.timing(impactValue, {
             toValue: 1,
-            duration: 90,
+            duration: impactRise,
             easing: Easing.out(Easing.quad),
             useNativeDriver: true,
           }),
-          Animated.timing(flash, {
+          Animated.timing(impactValue, {
             toValue: 0,
-            duration: 160,
+            duration: impactFall,
             easing: Easing.in(Easing.quad),
             useNativeDriver: true,
           }),
         ]),
         Animated.sequence([
-          Animated.timing(sparks, { toValue: 1, duration: 120, useNativeDriver: true }),
-          Animated.timing(sparks, { toValue: 0, duration: 260, useNativeDriver: true }),
+          Animated.timing(shakeValue, {
+            toValue: 1,
+            duration: 90,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(shakeValue, {
+            toValue: -1,
+            duration: 110,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(shakeValue, {
+            toValue: 0,
+            duration: 140,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
         ]),
       ]);
 
-      const retreat = Animated.parallel([
-        Animated.timing(leftSword, {
-          toValue: 0,
-          duration: 520,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(rightSword, {
-          toValue: 0,
-          duration: 520,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]);
+      const retreat = Animated.timing(approachValue, {
+        toValue: 0,
+        duration: retreatDuration,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      });
 
-      const cycle = Animated.loop(
+      cycle = Animated.loop(
         Animated.sequence([
           approach,
           impact,
+          Animated.delay(postImpactPause),
           retreat,
-          Animated.delay(900),
+          Animated.delay(resetPause),
         ])
       );
-
-      const glowPulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(glow, {
-            toValue: 1,
-            duration: 1400,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glow, {
-            toValue: 0,
-            duration: 1400,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-        ])
-      );
-
-      const glintSweep = Animated.loop(
-        Animated.sequence([
-          Animated.timing(glint, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-          Animated.timing(glint, { toValue: 0, duration: 200, easing: Easing.linear, useNativeDriver: true }),
-          Animated.delay(600),
-        ])
-      );
-
       cycle.start();
-      glowPulse.start();
-      glintSweep.start();
-
-      return () => {
-        cycle.stop();
-        glowPulse.stop();
-        glintSweep.stop();
-      };
+    } else {
+      approachValue.setValue(0);
+      impactValue.setValue(0);
+      shakeValue.setValue(0);
     }
 
-    // Reset to idle state
-    leftSword.setValue(0);
-    rightSword.setValue(0);
-    recoil.setValue(0);
-    sparks.setValue(0);
-    flash.setValue(0);
-    glint.setValue(0);
-    glow.setValue(0);
-  }, [isActive]);
+    return () => {
+      cycle?.stop();
+      approachValue.setValue(0);
+      impactValue.setValue(0);
+      shakeValue.setValue(0);
+    };
+  }, [approachValue, impactValue, isActive, isWeb, shakeValue]);
 
-  // Geometry & transforms
-  const approachOffset = size * 0.55;
-  // Impact formation based on shape, with symmetric 35° approach arcs
-  const leftEndAngle = 0;
-  const rightEndAngle = shape === 'plus' ? 90 : 0;
-  const leftStartAngle = leftEndAngle - 35;   // approach arc: -35° -> end
-  const rightStartAngle = rightEndAngle + 35; // approach arc: +35° -> end (mirrored)
-  const recoilAngle = 10; // deg extra deflection on impact
+  const clashWidth = size * (shape === 'parallel' ? 1.7 : 1.95);
+  const clashHeight = size * 1.85;
+  const bladeWidth = Math.max(12, size * 0.18);
+  const bladeHeight = size * 1.18;
+  const guardWidth = Math.max(18, size * 0.42);
+  const guardHeight = Math.max(10, size * 0.24);
+  const handleHeight = Math.max(12, size * 0.38);
+  const pommelSize = Math.max(6, size * 0.22);
 
-  const leftTransform = {
+  const approachDistance = size * (shape === 'parallel' ? 0.36 : 0.5);
+  const arcLift = size * (shape === 'parallel' ? 0.12 : 0.38);
+  const recoilAngle = shape === 'plus' ? 14 : 8;
+
+  const leftBaseRotation = approachValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [shape === 'plus' ? -34 : -16, shape === 'plus' ? 0 : -2],
+  });
+  const leftRecoil = impactValue.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, -recoilAngle, 0],
+  });
+  const leftRotation = Animated.add(leftBaseRotation, leftRecoil).interpolate({
+    inputRange: [-360, 360],
+    outputRange: ['-360deg', '360deg'],
+  });
+
+  const rightImpactTarget = 0;
+  const rightBaseRotation = approachValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [rightImpactTarget + 28, rightImpactTarget],
+  });
+  const rightRecoil = impactValue.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, recoilAngle, 0],
+  });
+  const rightRotation = Animated.add(rightBaseRotation, rightRecoil).interpolate({
+    inputRange: [-360, 360],
+    outputRange: ['-360deg', '360deg'],
+  });
+
+  const leftTranslateX = approachValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-approachDistance, 0],
+  });
+  const rightTranslateX = approachValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [approachDistance, 0],
+  });
+  const leftTranslateYBase = approachValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [shape === 'plus' ? arcLift : arcLift * 0.5, 0],
+  });
+  const rightTranslateYBase = approachValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: [shape === 'plus' ? -arcLift : -arcLift * 0.5, 0],
+  });
+  const leftImpactLift = impactValue.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, -size * 0.05, 0],
+  });
+  const rightImpactDrop = impactValue.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0, size * 0.05, 0],
+  });
+
+  const leftTranslateY = Animated.add(leftTranslateYBase, leftImpactLift);
+  const rightTranslateY = Animated.add(rightTranslateYBase, rightImpactDrop);
+
+  const shakeStyle = {
     transform: [
-      { translateX: leftSword.interpolate({ inputRange: [0, 1], outputRange: [-approachOffset, 0] }) },
-      { rotate: leftSword.interpolate({ inputRange: [0, 1], outputRange: [`${leftStartAngle}deg`, `${leftEndAngle}deg`] }) },
-      { rotate: recoil.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `-${recoilAngle}deg`] }) },
+      {
+        translateX: shakeValue.interpolate({
+          inputRange: [-1, 1],
+          outputRange: [-size * 0.12, size * 0.12],
+        }),
+      },
+      {
+        translateY: shakeValue.interpolate({
+          inputRange: [-1, 1],
+          outputRange: [size * 0.06, -size * 0.06],
+        }),
+      },
     ],
   };
 
-  const rightTransform = {
-    transform: [
-      { translateX: rightSword.interpolate({ inputRange: [0, 1], outputRange: [approachOffset, 0] }) },
-      { rotate: rightSword.interpolate({ inputRange: [0, 1], outputRange: [`${rightStartAngle}deg`, `${rightEndAngle}deg`] }) },
-      { rotate: recoil.interpolate({ inputRange: [0, 1], outputRange: ['0deg', `${recoilAngle}deg`] }) },
-      { scaleX: -1 }, // mirror for right side
-    ],
-  };
-
-  const sparkScale = sparks.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.3] });
-  const sparkOpacity = sparks.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 0] });
-
-  const glowStyle = {
-    opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.6] }),
-  };
-
-  const flashStyle = {
-    opacity: flash,
-    transform: [{ scale: flash.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.4] }) }],
-  } as const;
-
-  // Glint: sweep highlight across the blade
-  const glintTranslate = glint.interpolate({ inputRange: [0, 1], outputRange: [-size * 0.5, size * 0.5] });
+  const flashOpacity = impactValue.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 0.9, 0] });
+  const flashScale = impactValue.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.4] });
+  const sparkOpacity = impactValue.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 1, 0] });
+  const sparkScale = impactValue.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.2] });
+  const ringScale = impactValue.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.6] });
+  const ringOpacity = impactValue.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.8, 0] });
 
   return (
-    <View pointerEvents="none" style={[styles.container, { width: size * 2.2, height: size * 1.6 }]}> 
-      {/* Ambient glow */}
-      <Animated.View style={[styles.glow, glowStyle, { width: size * 2.8, height: size * 1.8 }]} />
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.container,
+        shakeStyle,
+        { width: clashWidth, height: clashHeight },
+      ]}
+    >
+      <Animated.View
+        style={[
+          styles.flash,
+          {
+            opacity: flashOpacity,
+            transform: [{ scale: flashScale }],
+            width: size * 0.9,
+            height: size * 0.9,
+          },
+        ]}
+      />
 
-      {/* Impact flash */}
-      <Animated.View style={[styles.flash, flashStyle, { width: size * 0.9, height: size * 0.9 }]} />
+      <Animated.View
+        style={[
+          styles.impactRing,
+          {
+            opacity: ringOpacity,
+            transform: [{ scale: ringScale }],
+            width: size * 0.9,
+            height: size * 0.9,
+          },
+        ]}
+      />
 
-      {/* Left sword */}
-      <Animated.View style={[styles.sword, leftTransform, { left: size * 0.06 }]}> 
-  {/* Blade (SVG curved) */}
-  <KatanaBlade width={Math.max(12, size * 0.18)} height={size * 1.05} />
-        {/* Cross guard */}
-        <View style={[styles.crossGuard, { width: Math.max(18, size * 0.42), height: Math.max(10, size * 0.22) }]}>
-          <View style={[styles.crossH, { height: Math.max(4, size * 0.08), borderRadius: Math.max(2, size * 0.04) }]} />
-          <View style={[styles.crossV, { width: Math.max(4, size * 0.08), borderRadius: Math.max(2, size * 0.04) }]} />
+      <Animated.View
+        style={[
+          styles.sword,
+          {
+            left: size * 0.02,
+            transform: [
+              { translateX: leftTranslateX },
+              { translateY: leftTranslateY },
+              { rotate: leftRotation },
+            ],
+          },
+        ]}
+      >
+        <KatanaBlade width={bladeWidth} height={bladeHeight} />
+        <View style={[styles.guard, { width: guardWidth, height: guardHeight }]}>
+          <View style={[styles.guardHorizontal, { height: Math.max(4, size * 0.08) }]} />
+          <View style={[styles.guardVertical, { width: Math.max(4, size * 0.08) }]} />
         </View>
-        {/* Grip */}
-        <View style={[styles.grip, { height: Math.max(10, size * 0.36) }]}> 
-          <View style={styles.gripWrap} />
+        <View style={[styles.handle, { height: handleHeight }]}>
+          <View style={styles.handleWrap} />
+          <View style={styles.handleWrapAlt} />
         </View>
-        {/* Pommel */}
-        <View style={[styles.pommel, { width: Math.max(6, size * 0.22), height: Math.max(6, size * 0.22), borderRadius: Math.max(3, size * 0.11) }]} />
-        {/* Motion afterimage (subtle) */}
-        <Animated.View style={[styles.bladeGhost, { width: Math.max(12, size * 0.18), height: size * 1.05, opacity: leftSword.interpolate({ inputRange: [0, 1], outputRange: [0.16, 0] }) }]} />
+        <View
+          style={[
+            styles.pommel,
+            {
+              width: pommelSize,
+              height: pommelSize,
+              borderRadius: pommelSize / 2,
+            },
+          ]}
+        />
       </Animated.View>
 
-      {/* Right sword */}
-      <Animated.View style={[styles.sword, rightTransform, { right: size * 0.06 }]}> 
-  <KatanaBlade width={Math.max(12, size * 0.18)} height={size * 1.05} tint={'#F43F5E'} />
-        <View style={[styles.crossGuard, { width: Math.max(18, size * 0.42), height: Math.max(10, size * 0.22) }]}>
-          <View style={[styles.crossH, { height: Math.max(4, size * 0.08), borderRadius: Math.max(2, size * 0.04) }]} />
-          <View style={[styles.crossV, { width: Math.max(4, size * 0.08), borderRadius: Math.max(2, size * 0.04) }]} />
+      <Animated.View
+        style={[
+          styles.sword,
+          {
+            right: size * 0.02,
+            transform: [
+              { translateX: rightTranslateX },
+              { translateY: rightTranslateY },
+              { rotate: rightRotation },
+              { scaleX: -1 },
+            ],
+          },
+        ]}
+      >
+        <KatanaBlade width={bladeWidth} height={bladeHeight} tint="#F43F5E" />
+        <View style={[styles.guard, { width: guardWidth, height: guardHeight }]}>
+          <View style={[styles.guardHorizontal, { height: Math.max(4, size * 0.08) }]} />
+          <View style={[styles.guardVertical, { width: Math.max(4, size * 0.08) }]} />
         </View>
-        <View style={[styles.grip, { height: Math.max(10, size * 0.36) }]}> 
-          <View style={styles.gripWrap} />
+        <View style={[styles.handle, { height: handleHeight }]}>
+          <View style={styles.handleWrap} />
+          <View style={styles.handleWrapAlt} />
         </View>
-        <View style={[styles.pommel, { width: Math.max(6, size * 0.22), height: Math.max(6, size * 0.22), borderRadius: Math.max(3, size * 0.11) }]} />
-        <Animated.View style={[styles.bladeGhost, { width: Math.max(12, size * 0.18), height: size * 1.05, opacity: rightSword.interpolate({ inputRange: [0, 1], outputRange: [0.16, 0] }) }]} />
+        <View
+          style={[
+            styles.pommel,
+            {
+              width: pommelSize,
+              height: pommelSize,
+              borderRadius: pommelSize / 2,
+            },
+          ]}
+        />
       </Animated.View>
 
-      {/* Sparks: sharp shards and embers */}
-      <Animated.View style={[styles.sparks, { opacity: sparkOpacity, transform: [{ scale: sparkScale }] }]}> 
-        {/* NW shard */}
-        <Animated.View style={[styles.spark, { height: 6, transform: [{ translateX: sparks.interpolate({ inputRange: [0,1], outputRange: [0, -size * 0.42] }) }, { translateY: sparks.interpolate({ inputRange: [0,1], outputRange: [0, -size * 0.26] }) }, { rotate: '-25deg' }] }]} />
-        {/* NE shard */}
-        <Animated.View style={[styles.spark, { height: 6, transform: [{ translateX: sparks.interpolate({ inputRange: [0,1], outputRange: [0, size * 0.42] }) }, { translateY: sparks.interpolate({ inputRange: [0,1], outputRange: [0, -size * 0.22] }) }, { rotate: '25deg' }] }]} />
-        {/* W ember */}
-        <Animated.View style={[styles.spark, { transform: [{ translateX: sparks.interpolate({ inputRange: [0,1], outputRange: [0, -size * 0.5] }) }] }]} />
-        {/* E ember */}
-        <Animated.View style={[styles.spark, { transform: [{ translateX: sparks.interpolate({ inputRange: [0,1], outputRange: [0, size * 0.5] }) }] }]} />
-        {/* SW shard */}
-        <Animated.View style={[styles.spark, { height: 6, transform: [{ translateX: sparks.interpolate({ inputRange: [0,1], outputRange: [0, -size * 0.28] }) }, { translateY: sparks.interpolate({ inputRange: [0,1], outputRange: [0, size * 0.22] }) }, { rotate: '18deg' }] }]} />
-        {/* SE shard */}
-        <Animated.View style={[styles.spark, { height: 6, transform: [{ translateX: sparks.interpolate({ inputRange: [0,1], outputRange: [0, size * 0.32] }) }, { translateY: sparks.interpolate({ inputRange: [0,1], outputRange: [0, size * 0.25] }) }, { rotate: '-18deg' }] }]} />
+      <Animated.View
+        style={[
+          styles.sparkCluster,
+          {
+            opacity: sparkOpacity,
+            transform: [{ scale: sparkScale }],
+          },
+        ]}
+      >
+        {SPARK_VECTORS.map((spark, index) => (
+          <Animated.View
+            key={`spark-${index}`}
+            style={[
+              styles.spark,
+              {
+                width: Math.max(2, size * 0.08),
+                height: Math.max(4, size * 0.18 * spark.scale),
+                transform: [
+                  {
+                    translateX: impactValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, spark.x * size],
+                    }),
+                  },
+                  {
+                    translateY: impactValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, spark.y * size],
+                    }),
+                  },
+                  { rotate: spark.rotate },
+                ],
+              },
+            ]}
+          />
+        ))}
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 };
 
@@ -241,144 +349,109 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-  },
-  glow: {
-    position: 'absolute',
-    backgroundColor: COLORS.secondary,
-    borderRadius: 50,
-    opacity: 0.3,
+    overflow: 'visible',
   },
   flash: {
     position: 'absolute',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.85)',
     borderRadius: 999,
-    shadowColor: COLORS.secondary,
-    shadowOpacity: 0.9,
-    shadowRadius: 8,
+    shadowColor: '#ffd166',
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  impactRing: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 229, 128, 0.9)',
+    borderRadius: 999,
+    backgroundColor: 'transparent',
+    shadowColor: '#ffef9f',
+    shadowOpacity: 0.6,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 0 },
   },
   sword: {
     position: 'absolute',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  blade: {
-    backgroundColor: COLORS.text,
-    borderRadius: 3,
-    overflow: 'hidden',
-    shadowColor: COLORS.secondary,
-    shadowOpacity: 0.6,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  bladeRidge: {
-    position: 'absolute',
-    top: '50%',
-    left: 0,
-    right: 0,
-    marginTop: -1,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-  },
-  glint: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 14,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    transform: [{ rotate: '0deg' }],
-  },
-  tip: {
-    position: 'absolute',
-    top: '50%',
-    marginTop: -4,
-    width: 0,
-    height: 0,
-    borderTopWidth: 4,
-    borderBottomWidth: 4,
-    borderLeftColor: COLORS.text,
-    borderTopColor: 'transparent',
-    borderBottomColor: 'transparent',
   },
   guard: {
-    height: 6,
-    backgroundColor: COLORS.primary,
-    borderRadius: 3,
-    marginTop: 3,
-    shadowColor: COLORS.primary,
-    shadowOpacity: 0.7,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  tsuba: {
-    backgroundColor: '#d4af37',
-    shadowColor: '#d4af37',
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 0 },
-    marginTop: 3,
-  },
-  grip: {
-    width: 7,
-    backgroundColor: '#1f2937',
-    borderRadius: 3,
-    marginTop: 2,
+    marginTop: 6,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: '#1d2735',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.6)',
+    overflow: 'hidden',
   },
-  gripWrap: {
-    width: '80%',
-    height: '70%',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 2,
-  },
-  pommel: {
-    backgroundColor: COLORS.secondary,
-    marginTop: 2,
-  },
-  bladeGhost: {
-    position: 'absolute',
-    backgroundColor: '#ffffff',
-    opacity: 0.15,
-    borderRadius: 3,
-  },
-  crossGuard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-    marginTop: 3,
-  },
-  crossH: {
+  guardHorizontal: {
     position: 'absolute',
     width: '100%',
-    backgroundColor: '#d4af37',
-    shadowColor: '#d4af37',
-    shadowOpacity: 0.7,
-    shadowRadius: 4,
+    backgroundColor: '#f4d35e',
+    shadowColor: '#f4d35e',
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 },
   },
-  crossV: {
+  guardVertical: {
     position: 'absolute',
     height: '100%',
-    backgroundColor: '#d4af37',
-    shadowColor: '#d4af37',
-    shadowOpacity: 0.7,
-    shadowRadius: 4,
+    backgroundColor: '#f4d35e',
+    shadowColor: '#f4d35e',
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 },
   },
-  sparks: {
+  handle: {
+    width: 12,
+    backgroundColor: '#101621',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.4)',
+    marginTop: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  handleWrap: {
+    position: 'absolute',
+    width: '78%',
+    height: '78%',
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    transform: [{ rotate: '11deg' }],
+  },
+  handleWrapAlt: {
+    position: 'absolute',
+    width: '78%',
+    height: '78%',
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 190, 120, 0.12)',
+    transform: [{ rotate: '-11deg' }],
+  },
+  pommel: {
+    backgroundColor: '#f4d35e',
+    marginTop: 4,
+    shadowColor: '#f4d35e',
+    shadowOpacity: 0.75,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  sparkCluster: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
   },
   spark: {
     position: 'absolute',
-    width: 2,
-    height: 4,
     backgroundColor: COLORS.warning,
-    borderRadius: 1.5,
+    borderRadius: 999,
     shadowColor: COLORS.warning,
     shadowOpacity: 1,
-    shadowRadius: 4,
+    shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 },
   },
 });
+
+export default SwordClash;

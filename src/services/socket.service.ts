@@ -153,14 +153,16 @@ class SocketService {
     try { console.debug('[socket] onConnect', { id: this.socket?.id }); } catch (e) {}
     this.reconnectAttempts = 0;
     this.rootStoreRef?.uiStore?.setConnectionStatus('connected');
-    // refresh profile to ensure we have correct player id
-    try {
-      await this.rootStoreRef?.userStore?.fetchUserProfile?.();
-      if (this.rootStoreRef?.userStore?.user && this.rootStoreRef.userStore.user.id) {
-        this.rootStoreRef.matchStore.myPlayerId = this.rootStoreRef.userStore.user.id;
+    const shouldHydrateProfile = !!this.rootStoreRef?.authStore?.isAuthenticated;
+    if (shouldHydrateProfile) {
+      try {
+        await this.rootStoreRef?.userStore?.fetchUserProfile?.();
+        if (this.rootStoreRef?.userStore?.user && this.rootStoreRef.userStore.user.id) {
+          this.rootStoreRef.matchStore.myPlayerId = this.rootStoreRef.userStore.user.id;
+        }
+      } catch (e) {
+        console.warn('[socket] Failed to refresh profile on connect:', e);
       }
-    } catch (e) {
-      // ignore
     }
 
     // flush offline queue
@@ -329,12 +331,9 @@ class SocketService {
   }
 
   // Other helper emits
-  findOpponent() {
-    this.socket?.emit('findOpponent');
-  }
-
-  findOpponentBySubject(subject: string) {
-    this.socket?.emit('findOpponentBySubject', { subject });
+  findOpponent(subject?: string) {
+    const payload = subject ? { subject } : {};
+    this.socket?.emit('findOpponent', payload);
   }
 
   cancelSearch() {
@@ -343,6 +342,46 @@ class SocketService {
 
   leaveMatch() {
     this.socket?.emit('leaveMatch');
+  }
+
+  async sendPrivateInvite(username: string, subject?: string) {
+    if (!this.socket || !this.socket.connected) {
+      throw new Error('Not connected');
+    }
+
+    return new Promise<{ inviteId: string; targetUsername: string; subject?: string }>((resolve, reject) => {
+      try {
+        this.socket?.emit('invitePlayer', { username, subject }, (res: any) => {
+          if (res && res.ok) {
+            resolve({ inviteId: res.inviteId, targetUsername: res.targetUsername, subject: res.subject });
+          } else {
+            reject(new Error((res && res.error) || 'Failed to send invite'));
+          }
+        });
+      } catch (err: any) {
+        reject(err instanceof Error ? err : new Error('Failed to send invite'));
+      }
+    });
+  }
+
+  async respondToInvite(inviteId: string, accepted: boolean) {
+    if (!this.socket || !this.socket.connected) {
+      throw new Error('Not connected');
+    }
+
+    return new Promise<{ accepted: boolean }>((resolve, reject) => {
+      try {
+        this.socket?.emit('respondInvite', { inviteId, accepted }, (res: any) => {
+          if (res && res.ok) {
+            resolve({ accepted: !!res.accepted });
+          } else {
+            reject(new Error((res && res.error) || 'Failed to respond to invite'));
+          }
+        });
+      } catch (err: any) {
+        reject(err instanceof Error ? err : new Error('Failed to respond to invite'));
+      }
+    });
   }
 
   emit(event: string, data?: any) {

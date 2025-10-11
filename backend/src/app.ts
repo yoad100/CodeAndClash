@@ -51,7 +51,14 @@ app.get('/health/readiness', async (req, res) => {
   try {
     // mongo
     const mongoose = await import('mongoose');
-    checks.mongodb = mongoose.connection.readyState === 1;
+    const connections = Array.isArray((mongoose as any).connections)
+      ? ((mongoose as any).connections as Array<{ readyState?: number }> )
+      : [];
+    const defaultConn = (mongoose as any).connection;
+    if (defaultConn && !connections.includes(defaultConn)) {
+      connections.push(defaultConn);
+    }
+    checks.mongodb = connections.some((conn) => conn && conn.readyState === 1);
   } catch (e) {
     checks.mongodb = false;
   }

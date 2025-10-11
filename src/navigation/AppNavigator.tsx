@@ -1,16 +1,19 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, type BottomTabHeaderProps } from '@react-navigation/bottom-tabs';
 import { observer } from 'mobx-react-lite';
 import { Ionicons } from '@expo/vector-icons';
 import { TouchableOpacity, Alert, View, Text, StyleSheet, Image } from 'react-native';
 import { COLORS } from '../constants/colors';
 import { rootStore } from '../stores/RootStore';
 import { socketService } from '../services/socket.service';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 // Screens
 import { AuthScreen } from '../screens/Auth/AuthScreen';
+import { EmailVerificationScreen } from '../screens/Auth/EmailVerificationScreen';
 import { HomeScreen } from '../screens/Home/HomeScreen';
 import { PremiumScreen } from '../screens/Premium/PremiumScreen';
 import { PremiumUpgradeScreen } from '../screens/Premium/PremiumUpgradeScreen';
@@ -21,6 +24,7 @@ import { RankingScreen } from '../screens/Ranking/RankingScreen';
 import { navigationRef } from '../utils/navigationRef';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { useNavigation } from '@react-navigation/native';
+import { IncomingInviteDialog } from '../components/match/IncomingInviteDialog';
 
 // Types
 import { RootStackParamList, MainTabParamList } from './types';
@@ -45,6 +49,21 @@ const MainTabs: React.FC = observer(() => {
   const [pendingTab, setPendingTab] = React.useState<string | null>(null);
   const [confirmVisible, setConfirmVisible] = React.useState(false);
   const nav = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+
+  const tabBarStyle = React.useMemo(() => ({
+    backgroundColor: COLORS.cardBackground,
+    borderTopColor: COLORS.border,
+    borderTopWidth: 1,
+    paddingBottom: Math.max(12, insets.bottom + 8),
+    paddingTop: 10,
+    height: 64 + insets.bottom,
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: -2 },
+    elevation: 8,
+  }), [insets.bottom]);
 
   const isInActiveMatch = !!(matchStore?.currentMatch && matchStore.currentMatch.status === 'active');
   
@@ -83,75 +102,82 @@ const MainTabs: React.FC = observer(() => {
   };
 
   // User Status Component for Navbar
-  const getUserStatus = () => {
+  const getUserStatus = React.useCallback(() => {
     if (isInActiveMatch) return { text: 'In Match', color: COLORS.success, icon: 'game-controller' };
     if (matchStore.isSearching) return { text: 'Searching', color: COLORS.warning, icon: 'search' };
     return { text: uiStore.connectionStatus || 'Online', color: COLORS.secondary, icon: 'checkmark-circle' };
-  };
+  }, [isInActiveMatch, matchStore.isSearching, uiStore.connectionStatus]);
 
-  const UserInfoHeader = () => {
+  const renderHeader = React.useCallback((props: BottomTabHeaderProps) => {
+    const { route, options } = props;
     const user = userStore.user;
-    console.log('🏠 UserInfoHeader render - user:', user ? 'exists' : 'null');
-    console.log('🏠 UserInfoHeader render - authStore.isAuthenticated:', authStore?.isAuthenticated);
-    
-    if (!user) return (
-      <TouchableOpacity
-        onPress={handleLogout}
-        style={navStyles.logoutOnlyButton}
-        accessibilityLabel="Logout"
-        accessibilityRole="button"
-        activeOpacity={0.7}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <Ionicons name="log-out-outline" size={24} color={COLORS.error} />
-      </TouchableOpacity>
-    );
+    const status = getUserStatus();
 
     return (
-      <View style={navStyles.userInfoContainer}>
-        {/* User Avatar */}
-        <View style={navStyles.avatarContainer}>
-          {user.avatar ? (
-            <Image source={{ uri: user.avatar }} style={navStyles.avatar} />
-          ) : (
-            <View style={[navStyles.avatar, navStyles.avatarPlaceholder]}>
-              <Text style={navStyles.avatarText}>
-                {user.username?.charAt(0)?.toUpperCase() ?? 'U'}
+      <LinearGradient
+        colors={['#0f172a', '#161538', '#1f0e3b']}
+        style={[headerStyles.gradient, { paddingTop: insets.top + 14 }]}
+      >
+        {isInActiveMatch && (
+          <View style={[headerStyles.liveBadge, headerStyles.liveBadgeStandalone]}>
+            <Ionicons name="flash" size={14} color={COLORS.background} />
+            <Text style={headerStyles.liveBadgeText}>LIVE</Text>
+          </View>
+        )}
+
+        <View style={headerStyles.userRow}>
+          <View style={headerStyles.avatarRing}>
+            {user?.avatar ? (
+              <Image source={{ uri: user.avatar }} style={headerStyles.avatarImage} />
+            ) : (
+              <Text style={headerStyles.avatarLetter}>
+                {user?.username?.charAt(0)?.toUpperCase() ?? 'U'}
               </Text>
+            )}
+          </View>
+
+          <View style={headerStyles.infoColumn}>
+            <Text style={headerStyles.username} numberOfLines={1}>
+              {user?.username ?? 'Guest'}
+            </Text>
+            <View style={headerStyles.pillRow}>
+              <View style={[headerStyles.statusPill, { borderColor: status.color, backgroundColor: `${status.color}22` }]}>
+                <Ionicons
+                  name={status.icon as any}
+                  size={13}
+                  color={status.color}
+                  style={headerStyles.pillIcon}
+                />
+                <Text style={[headerStyles.pillText, { color: status.color }]}>{status.text}</Text>
+              </View>
+              <View style={headerStyles.statPill}>
+                <Ionicons name="sparkles" size={13} color={COLORS.warning} style={headerStyles.pillIcon} />
+                <Text style={[headerStyles.pillText, { color: COLORS.white }]}>{user?.rating ?? '—'}</Text>
+              </View>
+              {user?.isPremium && (
+                <View style={headerStyles.statPill}>
+                  <Ionicons name="star" size={13} color={COLORS.warning} style={headerStyles.pillIcon} />
+                  <Text style={[headerStyles.pillText, { color: COLORS.white }]}>Premium</Text>
+                </View>
+              )}
             </View>
-          )}
+          </View>
+
+          <TouchableOpacity
+            onPress={handleLogout}
+            style={headerStyles.logoutButton}
+            accessibilityLabel="Logout"
+            accessibilityRole="button"
+            activeOpacity={0.75}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Ionicons name="log-out-outline" size={18} color={COLORS.error} />
+            <Text style={headerStyles.logoutText}>Logout</Text>
+          </TouchableOpacity>
         </View>
-        
-        {/* User Details */}
-        <View style={navStyles.userDetails}>
-          <Text style={navStyles.username} numberOfLines={1}>
-            {user.username ?? 'Guest'}
-          </Text>
-          <Text style={navStyles.ratingText}>
-            Rating: {user.rating ?? '-'}
-            {user.isPremium && (
-              <Text> </Text>
-            )}
-            {user.isPremium && (
-              <Ionicons name="star" size={12} color={COLORS.warning} />
-            )}
-          </Text>
-        </View>
-        
-        {/* Logout Button */}
-        <TouchableOpacity
-          onPress={handleLogout}
-          style={navStyles.logoutButton}
-          accessibilityLabel="Logout"
-          accessibilityRole="button"
-          activeOpacity={0.7}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="log-out-outline" size={22} color={COLORS.error} />
-        </TouchableOpacity>
-      </View>
+      </LinearGradient>
     );
-  };
+  }, [getUserStatus, handleLogout, insets.top, isInActiveMatch, matchStore.isSearching, uiStore.connectionStatus, userStore.user]);
   
   const requestLeaveMatch = (target: string) => {
     setPendingTab(target);
@@ -180,20 +206,7 @@ const MainTabs: React.FC = observer(() => {
     <React.Fragment>
       <Tab.Navigator
         screenOptions={{
-          tabBarStyle: {
-            backgroundColor: COLORS.cardBackground,
-            borderTopColor: COLORS.border,
-            borderTopWidth: 1,
-            paddingBottom: 8,
-            paddingTop: 8,
-            height: 60,
-            // subtle glow under the tab bar
-            shadowColor: COLORS.primary,
-            shadowOpacity: 0.25,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: -2 },
-            elevation: 8,
-          },
+          tabBarStyle,
           tabBarActiveTintColor: COLORS.secondary,
           tabBarInactiveTintColor: COLORS.textSecondary,
           tabBarLabelStyle: {
@@ -202,25 +215,8 @@ const MainTabs: React.FC = observer(() => {
             textShadowRadius: 6,
             textShadowOffset: { width: 0, height: 0 },
           },
-          headerStyle: {
-            backgroundColor: COLORS.cardBackground,
-            borderBottomColor: COLORS.border,
-            borderBottomWidth: 1,
-            // subtle bottom shadow
-            shadowColor: COLORS.primary,
-            shadowOpacity: 0.2,
-            shadowRadius: 8,
-            shadowOffset: { width: 0, height: 2 },
-          },
-          headerTintColor: COLORS.text,
-          headerTitleStyle: {
-            fontWeight: 'bold',
-            color: COLORS.text,
-            textShadowColor: COLORS.glowPrimary,
-            textShadowRadius: 8,
-            textShadowOffset: { width: 0, height: 0 },
-          },
-          headerRight: () => <UserInfoHeader />,
+          headerShadowVisible: false,
+          header: renderHeader,
         }}
       >
         <Tab.Screen
@@ -289,6 +285,7 @@ const MainTabs: React.FC = observer(() => {
         onCancel={onCancelLeave}
         destructive
       />
+      <IncomingInviteDialog />
     </React.Fragment>
   );
 });
@@ -335,11 +332,21 @@ export const AppNavigator: React.FC = observer(() => {
         }}
       >
         {!authStore.isAuthenticated ? (
-          <Stack.Screen
-            name="Auth"
-            component={AuthScreen}
-            options={{ headerShown: false }}
-          />
+          <>
+            <Stack.Screen
+              name="Auth"
+              component={AuthScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="EmailVerification"
+              component={EmailVerificationScreen}
+              options={{ 
+                headerShown: false,
+                gestureEnabled: false, // Prevent going back with swipe
+              }}
+            />
+          </>
         ) : (
           <>
             <Stack.Screen
@@ -362,67 +369,119 @@ export const AppNavigator: React.FC = observer(() => {
   );
 });
 
-// Navigation header styles
-const navStyles = StyleSheet.create({
-  userInfoContainer: {
+const headerStyles = StyleSheet.create({
+  gradient: {
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(148, 163, 184, 0.12)',
+    shadowColor: '#0ea5e9',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: COLORS.error,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    gap: 6,
   },
-  avatarContainer: {
-    marginRight: 12,
+  liveBadgeStandalone: {
+    alignSelf: 'flex-end',
+    marginBottom: 12,
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  liveBadgeText: {
+    color: COLORS.background,
+    fontWeight: '700',
+    fontSize: 11,
+    letterSpacing: 0.8,
   },
-  avatarPlaceholder: {
-    backgroundColor: COLORS.primary,
+  userRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatarRing: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 2,
+    borderColor: 'rgba(244, 114, 182, 0.6)',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
-  avatarText: {
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarLetter: {
     color: COLORS.white,
-    fontWeight: '700',
-    fontSize: 16,
+    fontWeight: '800',
+    fontSize: 18,
   },
-  userDetails: {
+  infoColumn: {
     flex: 1,
-    marginRight: 12,
-    minWidth: 100,
   },
   username: {
+    color: COLORS.white,
     fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 2,
+    fontWeight: '700',
   },
-  ratingText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
+  pillRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    gap: 6,
+  },
+  statPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(124, 58, 237, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.35)',
+    gap: 6,
+  },
+  pillIcon: {
+    marginRight: 2,
+  },
+  pillText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   logoutButton: {
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 87, 87, 0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 87, 87, 0.3)',
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+    gap: 6,
   },
-  logoutOnlyButton: {
-    marginRight: 16,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 87, 87, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 87, 87, 0.3)',
+  logoutText: {
+    color: COLORS.error,
+    fontWeight: '700',
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
 });

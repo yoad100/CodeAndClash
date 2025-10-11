@@ -20,6 +20,7 @@ export interface AnswerResultPayload {
   freeze: boolean;
   answerIndex: number;
   questionIndex: number;
+  unfreezeTime?: number;
 }
 
 export interface QuestionEndedPayload {

@@ -1,29 +1,37 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { observer } from 'mobx-react-lite';
+// Note: avoid wrapping this screen with MobX observer to prevent Fabric + Animated conflicts
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { Button } from '../../components/common/Button';
 import { ArcadeButton } from '../../components/fx/ArcadeButton';
-import Hourglass from '../../components/fx/Hourglass';
-import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { HourglassBeautiful } from '../../components/fx/HourglassBeautiful';
 import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
 import { RootStackParamList } from '../../navigation/types';
+import { reaction } from 'mobx';
+import { SUBJECTS } from '../../constants/subjects';
 
 type NavProp = StackNavigationProp<RootStackParamList>;
 
-export const MatchLobbyScreen: React.FC = observer(() => {
+export const MatchLobbyScreen: React.FC = () => {
   const { matchStore, uiStore } = rootStore;
   const navigation = useNavigation<NavProp>();
 
   useEffect(() => {
-    // navigate to Match screen when a match is created (pending or active)
-    if (matchStore.currentMatch) {
-      navigation.navigate('Match');
-    }
-  }, [matchStore.currentMatch?.status]);
+    // React to match status changes without making the whole screen an observer
+    const dispose = reaction(
+      () => matchStore.currentMatch?.status,
+      (status) => {
+        if (status) {
+          navigation.navigate('Match');
+        }
+      },
+      { fireImmediately: false }
+    );
+    return () => dispose();
+  }, [navigation, matchStore]);
 
   const handleCancel = () => {
     matchStore.cancelSearch();
@@ -31,14 +39,21 @@ export const MatchLobbyScreen: React.FC = observer(() => {
   };
 
   const opponent = matchStore.opponentPlayer;
+  const selectedSubject = matchStore.searchSubject;
+  const subjectName = React.useMemo(() => {
+    if (!selectedSubject || selectedSubject === 'any') return 'Any subject';
+    const subject = SUBJECTS.find((s) => s.id === selectedSubject);
+    return subject ? subject.name : selectedSubject;
+  }, [selectedSubject]);
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         {!matchStore.currentMatch || matchStore.currentMatch.status === 'pending' ? (
           <>
-            <Hourglass label="Finding Opponent" durationMs={20000} loop={true} showCountdown={true} />
-            <Text style={styles.hint}>Searching the arena for a worthy rival…</Text>
+            <HourglassBeautiful />
+            <Text style={styles.hint}>Finding Opponent…</Text>
+            <Text style={styles.subjectHint}>Focus: {subjectName}</Text>
                       <View style={styles.buttonContainer}>
             <ArcadeButton
               title="Cancel Search"
@@ -64,7 +79,7 @@ export const MatchLobbyScreen: React.FC = observer(() => {
       </View>
     </SafeAreaView>
   );
-});
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
@@ -81,5 +96,10 @@ const styles = StyleSheet.create({
   buttonContainer: {
     alignItems: 'center',
     marginTop: 16,
+  },
+  subjectHint: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    marginTop: 4,
   },
 });

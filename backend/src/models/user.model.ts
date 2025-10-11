@@ -9,6 +9,15 @@ const UserSchema = new Schema({
   wins: { type: Number, default: 0 },
   losses: { type: Number, default: 0 },
   avatar: { type: String },
+  
+  // Email verification fields
+  isEmailVerified: { type: Boolean, default: false },
+  emailVerificationToken: { type: String },
+  emailVerificationExpires: { type: Date },
+  
+  // Password reset fields (for future use)
+  passwordResetToken: { type: String },
+  passwordResetExpires: { type: Date },
 }, { timestamps: true });
 
 export const User = model('User', UserSchema);

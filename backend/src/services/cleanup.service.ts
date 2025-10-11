@@ -3,7 +3,7 @@ import logger from '../logger';
 
 export class SocketCleanupService {
   private static instance: SocketCleanupService;
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   
   static getInstance(): SocketCleanupService {
     if (!this.instance) {

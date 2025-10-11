@@ -92,6 +92,14 @@ class ApiService {
     return this.client.post('/auth/logout');
   }
 
+  async resendVerification(email: string) {
+    return this.client.post('/auth/resend-verification', { email });
+  }
+
+  async verifyEmail(token: string) {
+    return this.client.get(`/auth/verify-email?token=${token}`);
+  }
+
   async getUserProfile() {
     return this.client.get('/users/me');
   }

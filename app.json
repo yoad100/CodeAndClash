@@ -1,5 +1,10 @@
 {
-  "plugins": [
-    "expo-font"
-  ]
+  "expo": {
+    "plugins": [
+      "expo-font"
+    ],
+    "experiments": {
+      "reactNativeFabric": false
+    }
+  }
 }

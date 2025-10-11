@@ -8,82 +8,138 @@ import jwt from 'jsonwebtoken';
 import redis from './services/redis.client';
 import { scheduleJob, cancelJobs } from './services/scheduler.redis';
 import { createMatchState, getMatchState, updateMatchState, deleteMatchState } from './services/match.redis';
-import { findOpponentSchema, submitAnswerSchema, createPrivateMatchSchema, joinPrivateMatchSchema } from './validation/socket.schemas';
+import { findOpponentSchema, submitAnswerSchema, createPrivateMatchSchema, joinPrivateMatchSchema, invitePlayerSchema, respondInviteSchema } from './validation/socket.schemas';
 import { emitSocketError } from './utils/socketError';
-import { setSocketUser, deleteSocketUser } from './services/socketmap.redis';
+import { setSocketUser, deleteSocketUser, getUserSockets } from './services/socketmap.redis';
 import { eloRatingChange } from './utils/elo';
 import { createAdapter } from '@socket.io/redis-adapter';
 import logger from './logger';
 
-type QueueEntry = { socketId: string; userId?: string; guestId?: string; username?: string };
+type QueueEntry = { socketId: string; userId?: string; guestId?: string; username?: string; subject?: string };
+
+type Participant = { socketId: string; userId?: string; username: string };
+
+const isObjectId = (s: string) => /^[a-fA-F0-9]{24}$/.test(String(s));
 
 // Note: match runtime state is persisted in Redis via match.redis helpers.
 // Socket.IO rooms are used to address participants across instances: room `match:{matchId}`.
+const truncate = (value: string, max = 80) => {
+  if (!value) return value;
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+};
+
+async function hydrateMatchState(matchId: string) {
+  try {
+    logger.warn('startNextQuestion missing state for %s, hydrating from DB', matchId);
+    const match = await Match.findById(matchId).lean();
+    if (!match) {
+      logger.error('hydrateMatchState failed: match %s not found', matchId);
+      return null;
+    }
+    const questionIds = Array.isArray(match.questions) ? match.questions.map((q) => String(q)) : [];
+    const questionDocs = await Question.find({ _id: { $in: questionIds } }).lean();
+    const questionMap = new Map<string, any>();
+    questionDocs.forEach((doc) => {
+      questionMap.set(String(doc._id), doc);
+    });
+    const serializedQuestions = questionIds.map((qid) => {
+      const doc = questionMap.get(String(qid));
+      return {
+        id: doc?._id || qid,
+        correctIndex: typeof doc?.correctIndex === 'number' ? doc.correctIndex : 0,
+      };
+    });
+
+    const state = {
+      currentQuestionIndex: typeof (match as any).currentQuestionIndex === 'number' ? (match as any).currentQuestionIndex : -1,
+      frozen: {},
+      participants: [],
+      userIds: Array.isArray(match.players) ? match.players.map((p: any) => String(p.userId || p.id || '')) : [],
+      questions: serializedQuestions,
+    };
+
+    await createMatchState(matchId, state);
+    return state;
+  } catch (err) {
+    logger.error('hydrateMatchState unexpected error for %s: %o', matchId, err);
+    return null;
+  }
+}
+
 async function startNextQuestion(matchId: string) {
   logger.info('startNextQuestion called for match %s', matchId);
-  // load persisted match state from Redis
-  const ms = await getMatchState(matchId);
-  if (!ms) {
-    logger.warn('no match state found for %s', matchId);
-    return;
+  let ms = await getMatchState(matchId);
+  if (!ms || !Array.isArray(ms.questions) || ms.questions.length === 0) {
+    ms = await hydrateMatchState(matchId);
+    if (!ms) {
+      logger.warn('startNextQuestion aborting: match state unavailable for %s', matchId);
+      return;
+    }
   }
-  // IMPORTANT: do not use `|| -1` because 0 is falsy and would repeat question 0
+
+  const participants = Array.isArray(ms.participants) ? ms.participants : [];
+  logger.info('startNextQuestion state %s -> currentQuestionIndex=%s totalQuestions=%s participants=%o', matchId, String(ms.currentQuestionIndex), Array.isArray(ms.questions) ? ms.questions.length : 0, participants);
+
   const prevIndex = typeof ms.currentQuestionIndex === 'number' ? ms.currentQuestionIndex : -1;
   const qi = prevIndex + 1;
-  logger.info('starting question %d for match %s (prevIndex=%d)', qi, matchId, prevIndex);
+
+  if (!Array.isArray(ms.questions) || qi < 0 || qi >= ms.questions.length) {
+    logger.warn('startNextQuestion found no question for match %s at index %d (len=%s)', matchId, qi, Array.isArray(ms.questions) ? ms.questions.length : 'unknown');
+    return;
+  }
+
   // reset frozen map for next question and update currentQuestionIndex in Redis
   const resetFrozen = Object.keys(ms.frozen || {}).reduce((acc: any, k: string) => { acc[k] = false; return acc; }, {});
   await updateMatchState(matchId, { currentQuestionIndex: qi, frozen: resetFrozen });
   try {
     const msAfter = await getMatchState(matchId);
     logger.info('match %s state updated to currentQuestionIndex=%s', matchId, String(msAfter?.currentQuestionIndex));
-  } catch {}
-
-  const qEntry = ms.questions?.[qi];
-  if (!qEntry) {
-    logger.warn('no question at index %d for match %s', qi, matchId);
-    return;
+  } catch (err) {
+    logger.debug('startNextQuestion post-update getMatchState failed for %s: %o', matchId, err);
   }
 
-  // fetch full question to send sanitized content
-  const question = await Question.findById(qEntry.id).lean();
+  const qEntry = ms.questions[qi];
+  const question = qEntry?.id ? await Question.findById(qEntry.id).lean() : null;
   if (!question) {
-    logger.warn('question not found in DB: %s', qEntry.id);
+    logger.warn('startNextQuestion question lookup failed for match %s index=%d questionId=%s', matchId, qi, qEntry?.id);
     return;
   }
-  
-  // schedule individual player timeouts (15s each)
-  // First timeout at 15s, second at 30s (if first player times out)
+
   const firstTimeout = Date.now() + 15000;
   const secondTimeout = Date.now() + 30000;
-  
-  const q = { matchId, index: qi, question: { id: question._id, text: question.text, choices: question.choices }, questionEndAt: secondTimeout };
+
+  logger.info('startNextQuestion resolved question %s subject=%s text=%s', String(question._id), question.subject || 'any', truncate(question.text ?? ''));
+
+  const payload = {
+    matchId,
+    index: qi,
+    question: { id: question._id, text: question.text, choices: question.choices },
+    questionEndAt: secondTimeout,
+  };
   logger.info('emitting questionStarted for match %s question %d', matchId, qi);
-  // emit to room so cross-instance delivers to both players
   try {
-    (global as any).__io?.to(`match:${matchId}`).emit('questionStarted', q);
+    (global as any).__io?.to(`match:${matchId}`).emit('questionStarted', payload);
+    logger.info('startNextQuestion emitted questionStarted to room match:%s', matchId);
   } catch (e) {
     logger.warn('room emit questionStarted failed for match %s: %o', matchId, e);
   }
 
-  // Also send directly to known participant socketIds (fallback if adapter/rooms don't reach all instances)
-  try {
-    const participants: string[] = Array.isArray(ms.participants) ? ms.participants : [];
-    for (const sid of participants) {
-      try {
-        (global as any).__io?.to(sid).emit('questionStarted', q);
-      } catch (err) {
-        // best-effort per-socket emit
-        logger.debug('direct emit questionStarted to %s failed: %o', sid, err);
-      }
+  for (const sid of participants) {
+    try {
+      (global as any).__io?.to(sid).emit('questionStarted', payload);
+      logger.info('startNextQuestion direct emit questionStarted to %s', sid);
+    } catch (err) {
+      logger.debug('direct emit questionStarted to %s failed: %o', sid, err);
     }
-  } catch (e) {
-    // ignore
   }
 
   await scheduleJob(matchId, qi, firstTimeout, 'playerTimeout');
   await scheduleJob(matchId, qi, secondTimeout, 'questionEnd');
-  try { await updateMatchState(matchId, { questionEndAt: secondTimeout }); } catch {}
+  try {
+    await updateMatchState(matchId, { questionEndAt: secondTimeout });
+  } catch (err) {
+    logger.debug('startNextQuestion failed to persist questionEndAt for %s: %o', matchId, err);
+  }
 }
 
 // Redis-backed queues: queue:{subject}
@@ -104,7 +160,8 @@ async function enqueueRedis(subject: string, entry: QueueEntry) {
       } catch {}
     }
   } catch {}
-  await redis.rpush(key, JSON.stringify(entry));
+  const payload = { ...entry, subject } as QueueEntry;
+  await redis.rpush(key, JSON.stringify(payload));
 }
 
 async function tryPopPairRedis(subject: string) {
@@ -173,7 +230,6 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
   await match.save();
 
   // Update DB user stats and Redis leaderboard (only for real users with ObjectId-like ids)
-  const isObjectId = (s: string) => /^[a-fA-F0-9]{24}$/.test(String(s));
   for (const p of match.players as any[]) {
     if (!isObjectId(String(p.userId))) continue;
     const u = await User.findById(p.userId);
@@ -218,6 +274,90 @@ export function initSocket(server: HttpServer) {
   });
   // expose io globally for helper functions
   (global as any).__io = io;
+
+  async function loadQuestionsForSubject(subject: string): Promise<{ questions: any[]; subject: string }> {
+    const normalized = subject && subject !== 'any' ? subject : 'any';
+    const filter: any = {};
+    if (normalized !== 'any') filter.subject = normalized;
+
+    const total = await Question.countDocuments(filter);
+    if (!total) {
+      if (normalized !== 'any') {
+        logger.warn('No questions found for subject %s, falling back to any', normalized);
+        return loadQuestionsForSubject('any');
+      }
+      throw new Error('No questions available for matchmaking');
+    }
+
+    const limit = Math.min(5, total);
+    const skip = Math.max(0, Math.floor(Math.random() * Math.max(1, total - limit)));
+    const questions = await Question.find(filter).skip(skip).limit(limit).lean();
+    if (!questions.length) {
+      if (normalized !== 'any') {
+        logger.warn('Question query returned empty for %s after count %d, falling back to any', normalized, total);
+        return loadQuestionsForSubject('any');
+      }
+      throw new Error('No questions available for matchmaking');
+    }
+
+    return { questions, subject: normalized };
+  }
+
+  async function createMatchForParticipants(p1: Participant, p2: Participant, subject: string) {
+    const { questions, subject: resolvedSubject } = await loadQuestionsForSubject(subject);
+
+    const match = await Match.create({
+      players: [
+        { userId: p1.userId, username: p1.username },
+        { userId: p2.userId, username: p2.username },
+      ],
+      subject: resolvedSubject === 'any' ? undefined : resolvedSubject,
+      questions: questions.map((q: any) => q._id),
+      status: 'inprogress',
+      startedAt: new Date(),
+    });
+
+    await createMatchState(String(match._id), {
+      currentQuestionIndex: -1,
+      frozen: {},
+      participants: [String(p1.socketId), String(p2.socketId)],
+      userIds: [String(p1.userId || ''), String(p2.userId || '')],
+      questions: questions.map((q: any) => ({ id: q._id, correctIndex: q.correctIndex })),
+      subject: resolvedSubject,
+    });
+
+    try {
+      if (p1.userId && isObjectId(String(p1.userId))) await redis.set(`usermatch:${String(p1.userId)}`, String(match._id));
+      if (p2.userId && isObjectId(String(p2.userId))) await redis.set(`usermatch:${String(p2.userId)}`, String(match._id));
+    } catch {}
+
+    try {
+      io.in([p1.socketId, p2.socketId]).socketsJoin(`match:${match._id}`);
+    } catch (e) {
+      const s1 = io.sockets.sockets.get(p1.socketId);
+      if (s1) s1.join(`match:${match._id}`);
+      const s2 = io.sockets.sockets.get(p2.socketId);
+      if (s2) s2.join(`match:${match._id}`);
+    }
+
+  const subjectPayload = resolvedSubject === 'any' ? undefined : resolvedSubject;
+    io.to(p1.socketId).emit('matchFound', {
+      matchId: match._id,
+      player: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'You' },
+      opponent: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'Opponent' },
+      subject: subjectPayload,
+    });
+    io.to(p2.socketId).emit('matchFound', {
+      matchId: match._id,
+      player: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'You' },
+      opponent: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'Opponent' },
+      subject: subjectPayload,
+    });
+
+    startNextQuestion(String(match._id));
+
+    return match;
+  }
 
   // attach Redis adapter so emits/rooms work across instances
   let pubClient: ReturnType<typeof redis.duplicate> | null = null;
@@ -414,36 +554,220 @@ export function initSocket(server: HttpServer) {
   const p1 = { socketId: info.socketId, userId: info.userId, username: info.username };
   const p2 = { socketId: socket.id, userId: socketUser?.sub, username: socketUser?.username || 'Guest' };
 
-      // create match with subject if provided
       const subject = info.subject || 'any';
-      const filter: any = {};
-      if (subject !== 'any') filter.subject = subject;
-      const total = await Question.countDocuments(filter);
-      const skip = Math.max(0, Math.floor(Math.random() * Math.max(1, total - 5)));
-      const questions = await Question.find(filter).skip(skip).limit(5).lean();
+      const hostParticipant: Participant = {
+        socketId: String(p1.socketId),
+        userId: p1.userId ? String(p1.userId) : undefined,
+        username: p1.username || 'Host',
+      };
+      const joinParticipant: Participant = {
+        socketId: String(p2.socketId),
+        userId: p2.userId ? String(p2.userId) : undefined,
+        username: p2.username || 'Guest',
+      };
 
-  const match = await Match.create({ players: [ { userId: p1.userId, username: p1.username }, { userId: p2.userId, username: p2.username } ], subject: subject === 'any' ? undefined : subject, questions: questions.map((q:any)=>q._id), status: 'inprogress', startedAt: new Date() });
-  // persist match runtime state in Redis (include participant socket IDs)
-  await createMatchState(String(match._id), { currentQuestionIndex: -1, frozen: {}, participants: [String(p1.socketId), String(p2.socketId)], userIds: [String(p1.userId || ''), String(p2.userId || '')], questions: questions.map((q:any)=>({ id: q._id, correctIndex: q.correctIndex })) });
-      // map users to this match for reconnect handling
       try {
-        if (p1.userId) await redis.set(`usermatch:${String(p1.userId)}`, String(match._id));
-        if (p2.userId) await redis.set(`usermatch:${String(p2.userId)}`, String(match._id));
-      } catch {}
-      // make both sockets join the match room (works across instances via redis adapter)
-      try {
-        // Correct API: target specific socket ids and make them join the room (works across nodes via Redis adapter)
-        io.in([p1.socketId, p2.socketId]).socketsJoin(`match:${match._id}`);
-      } catch (e) {
-        // fallback: attempt to join individually where sockets are local
-        const s1 = io.sockets.sockets.get(p1.socketId);
-        if (s1) s1.join(`match:${match._id}`);
-        const s2 = io.sockets.sockets.get(p2.socketId);
-        if (s2) s2.join(`match:${match._id}`);
+        await createMatchForParticipants(hostParticipant, joinParticipant, subject);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to start private match';
+        socket.emit('error', { message });
+        try { io.to(p1.socketId).emit('error', { message }); } catch {}
+        return;
       }
-  io.to(p1.socketId).emit('matchFound', { matchId: match._id, player: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'You' }, opponent: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'Opponent' }, subject });
-  io.to(p2.socketId).emit('matchFound', { matchId: match._id, player: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'You' }, opponent: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'Opponent' }, subject });
-      startNextQuestion(String(match._id));
+    });
+
+    socket.on('invitePlayer', async (payload: any, ack?: (res: any) => void) => {
+      const reply = (res: any) => {
+        if (typeof ack === 'function') {
+          try { ack(res); } catch {}
+        } else if (res && res.error) {
+          socket.emit('privateInviteError', { message: res.error });
+        }
+      };
+
+      try {
+        if (!socketUser?.sub || !isObjectId(String(socketUser.sub))) {
+          reply({ ok: false, error: 'You must be logged in to invite players' });
+          return;
+        }
+
+        const parsed = invitePlayerSchema.safeParse(payload || {});
+        if (!parsed.success) {
+          reply({ ok: false, error: 'Invalid invite payload' });
+          return;
+        }
+
+        const inviterId = String(socketUser.sub);
+        const inviter = await User.findById(inviterId);
+        if (!inviter) {
+          reply({ ok: false, error: 'Inviter account not found' });
+          return;
+        }
+        if (!inviter.isPremium) {
+          reply({ ok: false, error: 'Premium membership required for private invites' });
+          return;
+        }
+
+        const usernameQuery = parsed.data.username.trim();
+        if (!usernameQuery) {
+          reply({ ok: false, error: 'Username is required' });
+          return;
+        }
+
+        const target = await User.findOne({ username: new RegExp(`^${usernameQuery}$`, 'i') });
+        if (!target) {
+          reply({ ok: false, error: 'Player not found' });
+          return;
+        }
+        if (String(target._id) === inviterId) {
+          reply({ ok: false, error: 'You cannot invite yourself' });
+          return;
+        }
+
+        const subject = parsed.data.subject && parsed.data.subject.trim() ? parsed.data.subject.trim() : 'any';
+        if (subject !== 'any' && !target.isPremium) {
+          reply({ ok: false, error: 'Target player must be premium for subject battles' });
+          return;
+        }
+
+        const targetSockets = await getUserSockets(String(target._id));
+        if (!targetSockets || targetSockets.length === 0) {
+          reply({ ok: false, error: 'Player is currently offline' });
+          return;
+        }
+
+        const inviteId = `INV_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+        const inviteRecord = {
+          inviteId,
+          inviterId,
+          inviterSocketId: socket.id,
+          inviterUsername: inviter.username,
+          targetId: String(target._id),
+          targetUsername: target.username,
+          subject,
+        };
+
+        await redis.setex(`invite:${inviteId}`, 120, JSON.stringify(inviteRecord));
+
+        reply({ ok: true, inviteId, subject, targetUsername: target.username });
+
+        socket.emit('privateInvitePending', {
+          inviteId,
+          target: { username: target.username },
+          subject: subject === 'any' ? undefined : subject,
+        });
+
+        const inviteEvent = {
+          inviteId,
+          from: { username: inviter.username },
+          subject: subject === 'any' ? undefined : subject,
+        };
+        for (const sid of targetSockets) {
+          try { io.to(sid).emit('privateInviteReceived', inviteEvent); } catch (err) {
+            logger.warn('Failed to deliver invite %s to socket %s: %o', inviteId, sid, err);
+          }
+        }
+      } catch (err) {
+        logger.error('invitePlayer handler error %o', err);
+        reply({ ok: false, error: 'Failed to send invite' });
+      }
+    });
+
+    socket.on('respondInvite', async (payload: any, ack?: (res: any) => void) => {
+      const reply = (res: any) => {
+        if (typeof ack === 'function') {
+          try { ack(res); } catch {}
+        } else if (res && res.error) {
+          socket.emit('privateInviteError', { message: res.error });
+        }
+      };
+
+      try {
+        if (!socketUser?.sub || !isObjectId(String(socketUser.sub))) {
+          reply({ ok: false, error: 'You must be logged in to respond to invites' });
+          return;
+        }
+
+        const parsed = respondInviteSchema.safeParse(payload || {});
+        if (!parsed.success) {
+          reply({ ok: false, error: 'Invalid invite response' });
+          return;
+        }
+
+        const inviteId = parsed.data.inviteId;
+        const raw = await redis.get(`invite:${inviteId}`);
+        if (!raw) {
+          reply({ ok: false, error: 'Invite expired or not found' });
+          return;
+        }
+
+        const info = JSON.parse(raw);
+        if (String(info.targetId) !== String(socketUser.sub)) {
+          reply({ ok: false, error: 'Invite does not belong to you' });
+          return;
+        }
+
+        await redis.del(`invite:${inviteId}`);
+
+        if (!parsed.data.accepted) {
+          reply({ ok: true, accepted: false });
+          try {
+            io.to(info.inviterSocketId).emit('privateInviteResult', {
+              inviteId,
+              accepted: false,
+              reason: 'declined',
+            });
+          } catch {}
+          return;
+        }
+
+        const inviterSockets = await getUserSockets(String(info.inviterId));
+        if (!inviterSockets || inviterSockets.length === 0) {
+          reply({ ok: false, error: 'Inviter is no longer online' });
+          return;
+        }
+
+        const inviterUser = await User.findById(info.inviterId);
+        const targetUser = await User.findById(info.targetId);
+        if (!inviterUser || !targetUser) {
+          reply({ ok: false, error: 'Player data not available' });
+          return;
+        }
+
+        const primaryInviterSocket = inviterSockets.includes(info.inviterSocketId)
+          ? info.inviterSocketId
+          : inviterSockets[0];
+
+        const inviterParticipant: Participant = {
+          socketId: String(primaryInviterSocket),
+          userId: String(info.inviterId),
+          username: inviterUser.username,
+        };
+        const targetParticipant: Participant = {
+          socketId: String(socket.id),
+          userId: String(info.targetId),
+          username: targetUser.username,
+        };
+
+        try {
+          await createMatchForParticipants(inviterParticipant, targetParticipant, info.subject || 'any');
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Failed to start private match';
+          reply({ ok: false, error: message });
+          for (const sid of inviterSockets) {
+            try { io.to(sid).emit('privateInviteResult', { inviteId, accepted: false, reason: 'error', message }); } catch {}
+          }
+          return;
+        }
+
+        reply({ ok: true, accepted: true });
+        for (const sid of inviterSockets) {
+          try { io.to(sid).emit('privateInviteResult', { inviteId, accepted: true }); } catch {}
+        }
+      } catch (err) {
+        logger.error('respondInvite handler error %o', err);
+        reply({ ok: false, error: 'Failed to respond to invite' });
+      }
     });
 
     socket.on('findOpponent', async (data: any) => {
@@ -477,8 +801,12 @@ export function initSocket(server: HttpServer) {
   logger.info('enqueued %s -> queue:%s', socket.id, subject);
 
       // Try to find a pair in subject queue first, then any
+      let pairingSubject = subject;
       let pair = await tryPopPairRedis(subject);
-      if (!pair && subject !== 'any') pair = await tryPopPairRedis('any');
+      if (!pair && subject !== 'any') {
+        pair = await tryPopPairRedis('any');
+        pairingSubject = 'any';
+      }
   if (!pair) return;
 
       const [p1, p2] = pair;
@@ -493,43 +821,43 @@ export function initSocket(server: HttpServer) {
         return;
       }
 
-      // load 5 random questions (subject if provided)
-      const filter: any = {};
-      if (subject !== 'any') filter.subject = subject;
-      const total = await Question.countDocuments(filter);
-      const skip = Math.max(0, Math.floor(Math.random() * Math.max(1, total - 5)));
-      const questions = await Question.find(filter).skip(skip).limit(5).lean();
+      const participantOne: Participant = {
+        socketId: String(p1.socketId),
+        userId: p1.userId ? String(p1.userId) : undefined,
+        username: p1.username || 'Player 1',
+      };
+      const participantTwo: Participant = {
+        socketId: String(p2.socketId),
+        userId: p2.userId ? String(p2.userId) : undefined,
+        username: p2.username || 'Player 2',
+      };
 
-      const match = await Match.create({
-        players: [ { userId: p1.userId, username: p1.username }, { userId: p2.userId, username: p2.username } ],
-        subject: subject === 'any' ? undefined : subject,
-        questions: questions.map((q: any) => q._id),
-        status: 'inprogress',
-        startedAt: new Date(),
-      });
-
-  // persist match runtime state in Redis and join room (include participant socket IDs)
-      await createMatchState(String(match._id), { currentQuestionIndex: -1, frozen: {}, participants: [String(p1.socketId), String(p2.socketId)], userIds: [String(p1.userId || ''), String(p2.userId || '')], questions: questions.map((q:any)=>({ id: q._id, correctIndex: q.correctIndex })) });
-          // map users to this match for reconnect handling
-          try {
-            if (p1.userId) await redis.set(`usermatch:${String(p1.userId)}`, String(match._id));
-            if (p2.userId) await redis.set(`usermatch:${String(p2.userId)}`, String(match._id));
-          } catch {}
-      try {
-        io.in([p1.socketId, p2.socketId]).socketsJoin(`match:${match._id}`);
-      } catch (e) {
-        const s1 = io.sockets.sockets.get(p1.socketId);
-        if (s1) s1.join(`match:${match._id}`);
-        const s2 = io.sockets.sockets.get(p2.socketId);
-        if (s2) s2.join(`match:${match._id}`);
+      const requestedSubjectA = p1.subject || pairingSubject;
+      const requestedSubjectB = p2.subject || pairingSubject;
+      let resolvedMatchSubject = pairingSubject;
+      if (requestedSubjectA === requestedSubjectB) {
+        resolvedMatchSubject = requestedSubjectA;
+      } else if (requestedSubjectA === 'any') {
+        resolvedMatchSubject = requestedSubjectB;
+      } else if (requestedSubjectB === 'any') {
+        resolvedMatchSubject = requestedSubjectA;
+      } else {
+        // Different specific subjects selected — requeue them separately to honour preferences
+        await enqueueRedis(requestedSubjectA, p1);
+        await enqueueRedis(requestedSubjectB, p2);
+        return;
       }
-  logger.info('about to emit matchFound match=%s p1=%s p2=%s', String(match._id), p1.socketId, p2.socketId);
-  logger.info('emitting matchFound to p1=%s p2=%s', p1.socketId, p2.socketId);
-  io.to(p1.socketId).emit('matchFound', { matchId: match._id, player: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'You' }, opponent: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'Opponent' }, subject });
-  io.to(p2.socketId).emit('matchFound', { matchId: match._id, player: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'You' }, opponent: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'Opponent' }, subject });
-      // start first question
-      logger.info('starting first question for match %s', String(match._id));
-      startNextQuestion(String(match._id));
+
+      try {
+        await createMatchForParticipants(participantOne, participantTwo, resolvedMatchSubject);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to start match';
+        logger.error('createMatchForParticipants failed for queue %s: %o', pairingSubject, err);
+        await enqueueRedis(requestedSubjectA || pairingSubject, p1);
+        await enqueueRedis(requestedSubjectB || pairingSubject, p2);
+        try { io.to(p1.socketId).emit('error', { message }); } catch {}
+        try { io.to(p2.socketId).emit('error', { message }); } catch {}
+      }
     });
 
     socket.on('submitAnswer', async (payload: any, ack?: (res: any) => void) => {
@@ -847,6 +1175,7 @@ export function initSocket(server: HttpServer) {
       // Remove this socket/user/guest from any queues to prevent ghost entries
       (async () => {
         try {
+          try { await deleteSocketUser(socket.id); } catch {}
           const gid = guestIdFromClient && typeof guestIdFromClient === 'string' ? String(guestIdFromClient) : undefined;
           const uid = socketUser?.sub ? String(socketUser.sub) : undefined;
           await removeFromAllQueues({ socketId: socket.id, userId: uid, guestId: gid });

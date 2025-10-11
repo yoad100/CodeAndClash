@@ -38,7 +38,9 @@ export const useOAuth = (): OAuthHookReturn => {
       setGoogleState({ loading: false, error: null });
     } catch (error: any) {
       console.error('Google OAuth error:', error);
-      setGoogleState({ loading: false, error: 'Authentication failed' });
+      const errorMessage = 'Google sign-in is currently unavailable. Please try logging in with email instead.';
+      setGoogleState({ loading: false, error: errorMessage });
+      rootStore.uiStore.showToast(errorMessage, 'error');
     }
   };
 
@@ -59,7 +61,9 @@ export const useOAuth = (): OAuthHookReturn => {
       setGithubState({ loading: false, error: null });
     } catch (error: any) {
       console.error('GitHub OAuth error:', error);
-      setGithubState({ loading: false, error: 'Authentication failed' });
+      const errorMessage = 'GitHub sign-in is currently unavailable. Please try logging in with email instead.';
+      setGithubState({ loading: false, error: errorMessage });
+      rootStore.uiStore.showToast(errorMessage, 'error');
     }
   };
 

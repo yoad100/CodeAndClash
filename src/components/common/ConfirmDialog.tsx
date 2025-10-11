@@ -4,8 +4,8 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Pressable,
+  ScrollView,
 } from 'react-native';
 import { Button } from './Button';
 import { COLORS } from '../../constants/colors';
@@ -41,18 +41,28 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <Pressable style={styles.overlay} onPress={onCancel}>
         <Pressable style={styles.dialog} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+          <View style={styles.messageContainer}>
+            <ScrollView
+              style={styles.messageScroll}
+              contentContainerStyle={styles.messageContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.message}>{message}</Text>
+            </ScrollView>
+          </View>
           <View style={styles.buttons}>
             <Button
               title={cancelText}
               onPress={onCancel}
               variant="outline"
+              size="small"
               style={styles.button}
             />
             <Button
               title={confirmText}
               onPress={onConfirm}
               variant={destructive ? 'danger' : 'primary'}
+              size="small"
               style={styles.button}
             />
           </View>
@@ -74,8 +84,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardBackground,
     borderRadius: 16,
     padding: 24,
-    width: '100%',
-    maxWidth: 400,
+    width: '90%',
+    maxWidth: 420,
+    maxHeight: '80%',
   },
   title: {
     fontSize: 20,
@@ -83,17 +94,33 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: 12,
   },
+  messageContainer: {
+    maxHeight: '60%',
+    marginBottom: 24,
+    width: '100%',
+    flexShrink: 1,
+  },
+  messageScroll: {
+    maxHeight: '100%',
+  },
+  messageContent: {
+    paddingRight: 6,
+  },
   message: {
     fontSize: 16,
     color: COLORS.textSecondary,
-    marginBottom: 24,
     lineHeight: 22,
+    textAlign: 'left',
   },
   buttons: {
     flexDirection: 'row',
+    justifyContent: 'flex-end',
     gap: 12,
+    width: '100%',
   },
   button: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 120,
   },
 });

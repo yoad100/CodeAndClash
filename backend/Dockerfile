@@ -9,6 +9,7 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 COPY package.json package-lock.json* ./
+RUN apk add --no-cache curl
 RUN npm ci --only=production
 # Copy compiled artifacts from build stage
 COPY --from=build /app/dist ./dist

@@ -23,6 +23,44 @@ export class AuthStore {
     });
   }
 
+  private async finalizeLogout(reason?: string): Promise<void> {
+    console.log('🔒 Finalizing logout cleanup', reason ? `(${reason})` : '');
+    try {
+      console.log('🔌 Disconnecting socket...');
+      socketService.disconnect();
+    } catch (err) {
+      console.warn('⚠️ Socket disconnect during logout failed:', err);
+    }
+
+    try {
+      console.log('🧹 Clearing storage...');
+      await StorageService.clearAll();
+    } catch (err) {
+      console.warn('⚠️ Failed to clear auth storage:', err);
+    }
+
+    try {
+      console.log('🔄 Clearing user data...');
+      this.rootStore?.userStore?.clearUserData?.();
+    } catch (err) {
+      console.warn('⚠️ Failed to clear user data during logout:', err);
+    }
+
+    try {
+      console.log('🔄 Resetting match data...');
+      this.rootStore?.matchStore?.resetMatch?.();
+    } catch (err) {
+      console.warn('⚠️ Failed to reset match store during logout:', err);
+    }
+
+    console.log('🔄 Setting isAuthenticated to false...');
+    runInAction(() => {
+      this.isAuthenticated = false;
+      this.isLoading = false;
+    });
+    console.log('✅ Logout process completed');
+  }
+
   async login(credentials: LoginCredentials): Promise<void> {
     this.isLoading = true;
     this.error = null;
@@ -80,7 +118,7 @@ export class AuthStore {
     }
   }
 
-  async register(credentials: RegisterCredentials): Promise<void> {
+  async register(credentials: RegisterCredentials): Promise<any> {
     this.isLoading = true;
     this.error = null;
 
@@ -90,6 +128,16 @@ export class AuthStore {
         credentials.email,
         credentials.password
       );
+
+      // Check if response indicates email verification is required
+      if (response.data.emailSent) {
+        runInAction(() => {
+          this.isLoading = false;
+        });
+        return response.data; // Return the response for the UI to handle
+      }
+
+      // Normal registration flow (when email verification is disabled)
       const { accessToken, refreshToken, user } = response.data;
 
       await StorageService.setTokens(accessToken, refreshToken);
@@ -99,6 +147,40 @@ export class AuthStore {
         this.isAuthenticated = true;
         this.isLoading = false;
       });
+
+      // After successful registration, set up user data and socket (same as login)
+      if (this.rootStore) {
+        console.log('🔄 Post-registration setup: connecting socket and updating user data...');
+        
+        // Update user store immediately with registration data
+        if (this.rootStore.userStore) {
+          this.rootStore.userStore.setUser(user);
+        }
+        
+        // Connect socket with new token
+        console.log('🔌 Connecting socket with new auth...');
+        socketService.disconnect();
+        // Small delay to ensure clean disconnection
+        setTimeout(() => {
+          socketService.connect();
+        }, 100);
+        
+        // Fetch fresh profile data in background
+        if (this.rootStore.userStore) {
+          try {
+            await this.rootStore.userStore.fetchUserProfile();
+          } catch (profileError) {
+            console.warn('⚠️ Failed to fetch fresh profile after registration:', profileError);
+          }
+        }
+
+        // Update match store player ID
+        if (this.rootStore.matchStore && user?.id) {
+          this.rootStore.matchStore.myPlayerId = user.id;
+        }
+      }
+
+      return response.data;
     } catch (error) {
       const apiError = error as ApiError;
       runInAction(() => {
@@ -124,6 +206,38 @@ export class AuthStore {
         this.isAuthenticated = true;
         this.isLoading = false;
       });
+
+      // After successful OAuth login, set up user data and socket (same as login/register)
+      if (this.rootStore) {
+        console.log('🔄 Post-OAuth setup: connecting socket and updating user data...');
+        
+        // Update user store immediately with OAuth data
+        if (this.rootStore.userStore) {
+          this.rootStore.userStore.setUser(user);
+        }
+        
+        // Connect socket with new token
+        console.log('🔌 Connecting socket with new auth...');
+        socketService.disconnect();
+        // Small delay to ensure clean disconnection
+        setTimeout(() => {
+          socketService.connect();
+        }, 100);
+        
+        // Fetch fresh profile data in background
+        if (this.rootStore.userStore) {
+          try {
+            await this.rootStore.userStore.fetchUserProfile();
+          } catch (profileError) {
+            console.warn('⚠️ Failed to fetch fresh profile after OAuth:', profileError);
+          }
+        }
+
+        // Update match store player ID
+        if (this.rootStore.matchStore && user?.id) {
+          this.rootStore.matchStore.myPlayerId = user.id;
+        }
+      }
     } catch (error) {
       const apiError = error as ApiError;
       runInAction(() => {
@@ -143,28 +257,13 @@ export class AuthStore {
     } catch (error) {
       console.error('❌ Logout API error:', error);
     } finally {
-      console.log('🔌 Disconnecting socket...');
-      socketService.disconnect();
-      
-      console.log('🧹 Clearing storage...');
-      await StorageService.clearAll();
-      
-      console.log('🔄 Clearing user data...');
-      if (this.rootStore?.userStore?.clearUserData) {
-        this.rootStore.userStore.clearUserData();
-      }
-      
-      console.log('🔄 Resetting match data...');
-      if (this.rootStore?.matchStore?.resetMatch) {
-        this.rootStore.matchStore.resetMatch();
-      }
-      
-      console.log('🔄 Setting isAuthenticated to false...');
-      runInAction(() => {
-        this.isAuthenticated = false;
-      });
-      console.log('✅ Logout process completed');
+      await this.finalizeLogout();
     }
+  }
+
+  async forceLogout(reason?: string): Promise<void> {
+    console.warn('⛔ Force logout triggered', reason ? `(${reason})` : '');
+    await this.finalizeLogout(reason);
   }
 
   clearError(): void {

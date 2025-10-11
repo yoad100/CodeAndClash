@@ -25,12 +25,28 @@ export class MatchStore {
   submittingForIndex: number | null = null;
   // Track answered questions to prevent multiple submissions per question
   answeredQuestions: Set<number> = new Set();
-  // Track eliminated (wrong) choices per question index to prevent re-choosing
-  knownWrongChoices: Record<number, Record<number, true>> = {};
+  // Track eliminated (wrong) choice indices per question (reactive via Set replacement)
+  knownWrongChoices: Map<number, Set<number>> = new Map();
   // Track freeze countdown for UI display (playerId -> seconds remaining)
-  freezeCountdowns: Record<string, number> = {};
+  freezeCountdowns: Map<string, number> = new Map();
+  // Track original freeze duration for progress visuals
+  freezeTotalDurations: Map<string, number> = new Map();
   // Flag to prevent double navigation on idle timeout
   private idleTimeoutTriggered = false;
+  // Private match invites
+  outgoingInvite: {
+    inviteId: string;
+    targetUsername: string;
+    subject?: string;
+    status: 'pending' | 'accepted' | 'declined' | 'expired' | 'error';
+    message?: string;
+  } | null = null;
+  incomingInvite: {
+    inviteId: string;
+    fromUsername: string;
+    subject?: string;
+  } | null = null;
+  isSendingInvite = false;
   
   private timerInterval: ReturnType<typeof setInterval> | null = null;
   private freezeTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
@@ -90,6 +106,26 @@ export class MatchStore {
       if (!this.isPayloadForCurrentMatch(p)) return;
       this.handleFreezeStateSync(p);
     });
+
+    socketService.on('privateInvitePending', (p: any) => {
+      this.debugPushEvent('privateInvitePending', p);
+      this.handleInvitePending(p);
+    });
+
+    socketService.on('privateInviteReceived', (p: any) => {
+      this.debugPushEvent('privateInviteReceived', p);
+      this.handleInviteReceived(p);
+    });
+
+    socketService.on('privateInviteResult', (p: any) => {
+      this.debugPushEvent('privateInviteResult', p);
+      this.handleInviteResult(p);
+    });
+
+    socketService.on('privateInviteError', (p: any) => {
+      this.debugPushEvent('privateInviteError', p);
+      this.handleInviteError(p);
+    });
   }
 
   // Ensure socket payloads are applied only to the current active match
@@ -104,17 +140,73 @@ export class MatchStore {
     this.isSearching = true;
     this.searchSubject = subject || null;
     
-    if (subject) {
-      socketService.findOpponentBySubject(subject);
-    } else {
-      socketService.findOpponent();
-    }
+    socketService.findOpponent(subject || undefined);
   }
 
   cancelSearch(): void {
     this.isSearching = false;
     this.searchSubject = null;
     socketService.cancelSearch();
+  }
+
+  async sendPrivateInvite(username: string, subject?: string): Promise<void> {
+    const trimmed = (username || '').trim();
+    if (!trimmed) {
+      const error = new Error('Username is required');
+      throw error;
+    }
+
+    this.isSendingInvite = true;
+    try {
+      const res = await socketService.sendPrivateInvite(trimmed, subject);
+      runInAction(() => {
+        this.isSendingInvite = false;
+        this.outgoingInvite = {
+          inviteId: res.inviteId,
+          targetUsername: res.targetUsername,
+          subject: res.subject,
+          status: 'pending',
+        };
+      });
+      this.rootStore?.uiStore?.showToast?.(`Invite sent to ${res.targetUsername}`, 'success');
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : 'Failed to send invite';
+      runInAction(() => {
+        this.isSendingInvite = false;
+      });
+      this.rootStore?.uiStore?.showToast?.(message, 'error');
+      throw err;
+    }
+  }
+
+  async respondToInvite(accepted: boolean): Promise<void> {
+    const invite = this.incomingInvite;
+    if (!invite) return;
+
+    try {
+      const res = await socketService.respondToInvite(invite.inviteId, accepted);
+      if (accepted && res.accepted) {
+        this.rootStore?.uiStore?.showToast?.('Connecting you to the duel…', 'success');
+        runInAction(() => {
+          this.isSearching = true;
+        });
+        this.navigateToMatchLobbyWithRetry();
+      } else if (!accepted) {
+        this.rootStore?.uiStore?.showToast?.('Invite declined', 'info');
+      }
+      runInAction(() => {
+        this.incomingInvite = null;
+      });
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : 'Failed to respond to invite';
+      this.rootStore?.uiStore?.showToast?.(message, 'error');
+      // Only clear invite if we successfully accepted; keep it for retries on decline failure
+      if (accepted) {
+        runInAction(() => {
+          this.incomingInvite = null;
+        });
+      }
+    }
   }
 
   private handleMatchFound(data: MatchFoundPayload): void {
@@ -137,22 +229,59 @@ export class MatchStore {
       if (data.player?.id) {
         this.myPlayerId = String(data.player.id);
       }
+
+      this.incomingInvite = null;
+      if (this.outgoingInvite) {
+        this.outgoingInvite = { ...this.outgoingInvite, status: 'accepted' };
+      }
+      this.searchSubject = data.subject || null;
     });
+
+    this.navigateToMatchLobbyWithRetry();
   }
 
   private handleQuestionStarted(payload: QuestionStartedPayload): void {
     // payload: { index, question: { id, text, choices } }
   if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('handleQuestionStarted:', payload);
     runInAction(() => {
-      if (!this.currentMatch) return;
+      if (!this.currentMatch) {
+        console.warn('handleQuestionStarted: no currentMatch');
+        return;
+      }
+      
+      // Ensure questions array exists and has enough space
+      if (!this.currentMatch.questions) {
+        this.currentMatch.questions = [];
+      }
+      
       // ensure questions array exists and push formatted question
       const q = payload.question;
       // convert to frontend Question shape
       const fq = { id: String(q.id), text: q.text, choices: q.choices, correctIndex: -1 };
-      // ensure array length
+      // ensure array length - make sure the array has enough slots
+      while (this.currentMatch.questions.length <= payload.index) {
+        this.currentMatch.questions.push(null as any);
+      }
       this.currentMatch.questions[payload.index] = fq as any;
       this.currentMatch.status = 'active';
       this.currentQuestionIndex = payload.index;
+      
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log('Question set successfully:', {
+          index: payload.index,
+          questionText: q.text,
+          questionsLength: this.currentMatch.questions.length,
+          questionsArray: this.currentMatch.questions,
+          currentQuestionIndex: this.currentQuestionIndex,
+          questionAtCurrentIndex: this.currentMatch.questions[this.currentQuestionIndex],
+          currentQuestion: this.currentQuestion
+        });
+        
+        // Force a small delay to check if MobX reactivity catches up
+        setTimeout(() => {
+          console.log('currentQuestion after timeout:', this.currentQuestion);
+        }, 100);
+      }
       this.timeRemaining = 30; // Reset to 30 seconds (idle timer)
       
       // Reset frozen state for new question (everyone can answer initially)
@@ -160,11 +289,12 @@ export class MatchStore {
       // Clear all existing freeze timers and countdowns
       this.freezeTimeouts.forEach(timeout => clearTimeout(timeout));
       this.freezeTimeouts.clear();
-      this.freezeCountdownIntervals.forEach(interval => clearInterval(interval));
-      this.freezeCountdownIntervals.clear();
-      this.freezeCountdowns = {};
-  // Reset eliminated choices for this question
-  this.knownWrongChoices[payload.index] = {};
+  this.freezeCountdownIntervals.forEach(interval => clearInterval(interval));
+  this.freezeCountdownIntervals.clear();
+    this.freezeCountdowns.clear();
+    this.freezeTotalDurations.clear();
+    // Reset eliminated choices for this question
+  this.knownWrongChoices.set(payload.index, new Set());
       // Reset per-question submit throttling and transient UI flags
       this.submittingForIndex = null;
       this.answeredQuestions.clear(); // Allow answering new question
@@ -179,22 +309,22 @@ export class MatchStore {
   private handleAnswerResult(payload: AnswerResultPayload): void {
     if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🎯 ANSWER RESULT:', payload);
     if (!this.currentMatch) return;
+    const playerId = String(payload.playerId);
     
     runInAction(() => {
-      // Mark question as answered if it's my answer to prevent fast-clicking
-      if (payload.playerId === this.myUserId) {
+      if (payload.correct) {
         this.answeredQuestions.add(payload.questionIndex);
-        if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('✅ Marked question as answered:', payload.questionIndex);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('✅ Question resolved for index:', payload.questionIndex);
       }
       
       // Update player score
-      const playerIndex = this.currentMatch!.players.findIndex((p) => p.id === payload.playerId);
+      const playerIndex = this.currentMatch!.players.findIndex((p) => String(p.id) === playerId);
       if (playerIndex !== -1 && payload.correct) {
         this.currentMatch!.players[playerIndex].score = (this.currentMatch!.players[playerIndex].score || 0) + 1;
       }
       
       // Update combo for my answers only
-      if (payload.playerId === this.myUserId) {
+      if (playerId === this.myUserId) {
         this.myCombo = payload.correct ? (this.myCombo || 0) + 1 : 0;
       }
       
@@ -204,24 +334,28 @@ export class MatchStore {
       // Handle freeze state - SIMPLIFIED
       if (payload.freeze) {
         // Player gets frozen
-        this.frozen[payload.playerId] = true;
-        this.startFreezeCountdown(payload.playerId);
-        if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('❄️ FROZEN:', payload.playerId);
+        this.frozen[playerId] = true;
+        this.startFreezeCountdown(playerId, (payload as any).unfreezeTime);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('❄️ FROZEN:', playerId);
       } else {
         // Player gets unfrozen
-        delete this.frozen[payload.playerId];
-        this.clearFreezeCountdown(payload.playerId);
-        if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔥 UNFROZEN:', payload.playerId);
+        delete this.frozen[playerId];
+        this.clearFreezeCountdown(playerId);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔥 UNFROZEN:', playerId);
       }
       
       // Mark wrong answers as eliminated
       if (!payload.correct && typeof payload.answerIndex === 'number') {
         const qIdx = payload.questionIndex;
-        if (!this.knownWrongChoices[qIdx]) this.knownWrongChoices[qIdx] = {};
-        this.knownWrongChoices[qIdx][payload.answerIndex] = true;
+        const existingSet = this.knownWrongChoices.get(qIdx);
+        const nextSet = new Set(existingSet ? Array.from(existingSet) : []);
+        if (!nextSet.has(payload.answerIndex)) {
+          nextSet.add(payload.answerIndex);
+          this.knownWrongChoices.set(qIdx, nextSet);
+        }
         
         // Show opponent's wrong choice
-        if (payload.playerId !== this.myUserId) {
+        if (playerId !== this.myUserId) {
           this.opponentWrongAnswer = payload.answerIndex;
           setTimeout(() => runInAction(() => { this.opponentWrongAnswer = null; }), 3000);
         }
@@ -230,7 +364,7 @@ export class MatchStore {
       // Show answer result animation
       if (payload.questionIndex === this.currentQuestionIndex) {
         this.lastAnswerResult = {
-          playerId: payload.playerId,
+          playerId,
           correct: !!payload.correct,
           questionIndex: payload.questionIndex,
           answerIndex: payload.answerIndex,
@@ -347,34 +481,57 @@ export class MatchStore {
     tryNav();
   }
 
+  private navigateToMatchLobbyWithRetry(maxAttempts = 10, delayMs = 200): void {
+    let attempts = 0;
+    const tryNav = () => {
+      attempts++;
+      try {
+        const { navigationRef } = require('../utils/navigationRef');
+        if (navigationRef && typeof navigationRef.isReady === 'function' && navigationRef.isReady()) {
+          const currentRoute = typeof navigationRef.getCurrentRoute === 'function' ? navigationRef.getCurrentRoute() : null;
+          if (currentRoute?.name === 'Match') {
+            return;
+          }
+          navigationRef.navigate('Main' as any, { screen: 'Home', params: { screen: 'MatchLobby' } } as any);
+          return;
+        }
+      } catch {}
+      if (attempts < maxAttempts) {
+        setTimeout(tryNav, delayMs);
+      }
+    };
+    tryNav();
+  }
+
   private handlePlayerUnfrozen(payload: any): void {
     if (!this.currentMatch) return;
+    const playerId = String(payload.playerId);
     
     runInAction(() => {
-      delete this.frozen[payload.playerId];
-      this.clearFreezeCountdown(payload.playerId);
+      delete this.frozen[playerId];
+      this.clearFreezeCountdown(playerId);
       
       // Clear submission throttling when player gets unfrozen
       // This allows rapid clicking after unfreeze without being blocked by previous submissions
-      if (payload.playerId === this.myUserId && this.submittingForIndex !== null) {
+      if (playerId === this.myUserId && this.submittingForIndex !== null) {
         this.submittingForIndex = null;
       }
       
       // Clear answered questions when unfrozen to allow re-answering
-      if (payload.playerId === this.myUserId) {
+      if (playerId === this.myUserId) {
         this.answeredQuestions.clear();
         if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔄 Cleared answered questions - can answer again');
       }
       
       // Update player model
-      const playerIndex = this.currentMatch!.players.findIndex((p) => p.id === payload.playerId);
+      const playerIndex = this.currentMatch!.players.findIndex((p) => String(p.id) === playerId);
       if (playerIndex !== -1) {
         this.currentMatch!.players[playerIndex].isFrozen = false;
       }
     });
     
     // Grace period: If this is my unfreeze, add a brief window to handle rapid clicks
-    if (payload.playerId === this.myUserId) {
+    if (playerId === this.myUserId) {
       // Force state update and allow immediate submissions for a short window
       setTimeout(() => {
         runInAction(() => {
@@ -394,26 +551,97 @@ export class MatchStore {
       this.frozen = {};
       this.freezeTimeouts.forEach(timeout => clearTimeout(timeout));
       this.freezeTimeouts.clear();
-      this.freezeCountdownIntervals.forEach(interval => clearInterval(interval));
-      this.freezeCountdownIntervals.clear();
-      this.freezeCountdowns = {};
+  this.freezeCountdownIntervals.forEach(interval => clearInterval(interval));
+  this.freezeCountdownIntervals.clear();
+  this.freezeCountdowns.clear();
+  this.freezeTotalDurations.clear();
       
       // Apply server freeze state
       const serverFrozen = payload.frozen || {};
       const now = Date.now();
       
       for (const [playerId, freezeTime] of Object.entries(serverFrozen)) {
+        const key = String(playerId);
         if (typeof freezeTime === 'number' && freezeTime > now) {
           // Player is still frozen
-          this.frozen[playerId] = true;
+          this.frozen[key] = true;
           const remainingMs = freezeTime - now;
           const remainingSeconds = Math.ceil(remainingMs / 1000);
-          this.freezeCountdowns[playerId] = remainingSeconds;
-          this.startFreezeCountdown(playerId);
-          if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔄 Synced freeze for', playerId, 'remaining:', remainingSeconds + 's');
+          this.freezeCountdowns.set(key, remainingSeconds);
+          if (!this.freezeTotalDurations.has(key)) {
+            this.freezeTotalDurations.set(key, remainingSeconds);
+          }
+          this.startFreezeCountdown(key, freezeTime);
+          if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔄 Synced freeze for', key, 'remaining:', remainingSeconds + 's');
         }
       }
     });
+  }
+
+  private handleInvitePending(payload: any): void {
+    const inviteId = String(payload?.inviteId || '');
+    if (!inviteId) return;
+    runInAction(() => {
+      this.isSendingInvite = false;
+      this.outgoingInvite = {
+        inviteId,
+        targetUsername: payload?.target?.username || this.outgoingInvite?.targetUsername || 'Player',
+        subject: payload?.subject,
+        status: 'pending',
+      };
+    });
+  }
+
+  private handleInviteReceived(payload: any): void {
+    const inviteId = String(payload?.inviteId || '');
+    if (!inviteId) return;
+    const fromUsername = payload?.from?.username || 'Challenger';
+    const subject = payload?.subject;
+    runInAction(() => {
+      this.incomingInvite = { inviteId, fromUsername, subject };
+    });
+    this.rootStore?.uiStore?.showToast?.(`${fromUsername} challenged you to a duel!`, 'info');
+  }
+
+  private handleInviteResult(payload: any): void {
+    if (!payload || !this.outgoingInvite) return;
+    const inviteId = String(payload.inviteId || '');
+    if (!inviteId || this.outgoingInvite.inviteId !== inviteId) return;
+
+    const accepted = !!payload.accepted;
+    const reason: string | undefined = payload.reason;
+    const message: string | undefined = payload.message;
+
+    runInAction(() => {
+      this.outgoingInvite = {
+        ...this.outgoingInvite!,
+        status: accepted ? 'accepted' : reason === 'expired' ? 'expired' : 'declined',
+        message: message || (accepted ? undefined : reason === 'declined' ? 'Invite declined' : reason === 'expired' ? 'Invite expired' : message),
+      };
+    });
+
+    if (accepted) {
+      this.rootStore?.uiStore?.showToast?.('Invite accepted! Preparing match…', 'success');
+    } else if (reason === 'expired') {
+      this.rootStore?.uiStore?.showToast?.('Invite expired before it was accepted', 'warning');
+    } else {
+      this.rootStore?.uiStore?.showToast?.('Invite was declined', 'info');
+    }
+  }
+
+  private handleInviteError(payload: any): void {
+    const message = (payload && (payload.message || payload.error)) || 'Invite failed';
+    runInAction(() => {
+      this.isSendingInvite = false;
+      if (this.outgoingInvite) {
+        this.outgoingInvite = {
+          ...this.outgoingInvite,
+          status: 'error',
+          message,
+        };
+      }
+    });
+    this.rootStore?.uiStore?.showToast?.(message, 'error');
   }
 
   submitAnswer(questionIndex: number, answerIndex: number): void {
@@ -511,33 +739,51 @@ export class MatchStore {
     this.navigateHomeWithRetry();
   }
 
-  private startFreezeCountdown(playerId: string): void {
+  private startFreezeCountdown(playerId: string, unfreezeTime?: number): void {
     this.clearFreezeCountdown(playerId);
-    
-    if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('⏱️ Starting countdown for:', playerId);
-    
-    // Set countdown to 15 seconds
-    this.freezeCountdowns[playerId] = 15;
-    
-    // Start countdown interval
+
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('⏱️ Starting countdown for:', playerId, {
+        myUserId: this.myUserId,
+        myPlayerId: this.myPlayerId,
+        authUserId: this.rootStore?.authStore?.currentUser?.id,
+        isMe: playerId === this.myUserId,
+        providedUnfreeze: unfreezeTime
+      });
+    }
+
+    const now = Date.now();
+    const targetMs = typeof unfreezeTime === 'number' && unfreezeTime > now ? unfreezeTime : now + 15000;
+    const baseSeconds = Math.ceil((targetMs - now) / 1000);
+    const totalSeconds = Math.min(15, Math.max(1, baseSeconds));
+
+    this.freezeCountdowns.set(playerId, totalSeconds);
+    if (!this.freezeTotalDurations.has(playerId) || (this.freezeTotalDurations.get(playerId) ?? 0) < totalSeconds) {
+      this.freezeTotalDurations.set(playerId, totalSeconds);
+    }
+
     const interval = setInterval(() => {
       runInAction(() => {
-        if (this.freezeCountdowns[playerId] > 0) {
-          this.freezeCountdowns[playerId]--;
-          if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('⏰', playerId, ':', this.freezeCountdowns[playerId]);
-        }
-        
-        if (this.freezeCountdowns[playerId] <= 0) {
-          if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔓 Auto-unfreeze:', playerId);
-          this.unfreezePlayer(playerId);
+        const current = this.freezeCountdowns.get(playerId);
+        if (typeof current === 'number') {
+          const next = current - 1;
+          if (next > 0) {
+            this.freezeCountdowns.set(playerId, next);
+            if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('⏰', playerId, ':', next);
+          } else {
+            if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔓 Auto-unfreeze:', playerId);
+            this.unfreezePlayer(playerId);
+          }
+        } else {
+          this.clearFreezeCountdown(playerId);
         }
       });
     }, 1000);
-    
+
     this.freezeCountdownIntervals.set(playerId, interval);
-    
-    // Fallback timeout
-    const timeout = setTimeout(() => this.unfreezePlayer(playerId), 15000);
+
+  const timeoutDuration = totalSeconds * 1000;
+  const timeout = setTimeout(() => this.unfreezePlayer(playerId), timeoutDuration);
     this.freezeTimeouts.set(playerId, timeout);
   }
 
@@ -557,7 +803,8 @@ export class MatchStore {
     }
     
     // Clear UI countdown
-    delete this.freezeCountdowns[playerId];
+    this.freezeCountdowns.delete(playerId);
+    this.freezeTotalDurations.delete(playerId);
   }
 
   private unfreezePlayer(playerId: string): void {
@@ -584,9 +831,11 @@ export class MatchStore {
       this.frozen = {};
       this.freezeTimeouts.forEach(timeout => clearTimeout(timeout));
       this.freezeTimeouts.clear();
-      this.freezeCountdownIntervals.forEach(interval => clearInterval(interval));
-      this.freezeCountdownIntervals.clear();
-      this.freezeCountdowns = {};
+  this.freezeCountdownIntervals.forEach(interval => clearInterval(interval));
+  this.freezeCountdownIntervals.clear();
+  this.freezeCountdowns.clear();
+  this.freezeTotalDurations.clear();
+  this.knownWrongChoices.delete(this.currentQuestionIndex);
       
       if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🏁 Question ended - cleared all freeze states');
     });
@@ -613,22 +862,41 @@ export class MatchStore {
     this.currentMatch = null;
     this.currentQuestionIndex = 0;
     this.timeRemaining = 30; // Reset to 30 seconds
-    this.frozen = {};
-    this.freezeCountdowns = {};
+  this.frozen = {};
+  this.freezeCountdowns.clear();
+  this.freezeTotalDurations.clear();
+  this.knownWrongChoices.clear();
     this.isSearching = false;
     this.searchSubject = null;
     this.idleTimeoutTriggered = false; // Reset flag
   }
 
   get currentQuestion(): Question | null {
-    if (!this.currentMatch || !this.currentMatch.questions) return null;
-    return this.currentMatch.questions[this.currentQuestionIndex] || null;
+    if (!this.currentMatch || !this.currentMatch.questions) {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log('currentQuestion: no match or questions', {
+          hasCurrentMatch: !!this.currentMatch,
+          hasQuestions: !!this.currentMatch?.questions
+        });
+      }
+      return null;
+    }
+    const question = this.currentMatch.questions[this.currentQuestionIndex] || null;
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('currentQuestion getter:', {
+        currentQuestionIndex: this.currentQuestionIndex,
+        questionsLength: this.currentMatch.questions.length,
+        questionAtIndex: this.currentMatch.questions[this.currentQuestionIndex],
+        question: question
+      });
+    }
+    return question;
   }
 
   // Set of disabled choices for the current question (eliminated wrong answers)
   get disabledChoicesForCurrentQuestion(): Set<number> {
-    const map = this.knownWrongChoices[this.currentQuestionIndex] || {};
-    return new Set(Object.keys(map).map((k) => Number(k)));
+  const entrySet = this.knownWrongChoices.get(this.currentQuestionIndex);
+  return entrySet ? new Set(entrySet) : new Set();
   }
 
   get myPlayer(): MatchPlayer | null {
@@ -648,7 +916,8 @@ export class MatchStore {
   }
 
   get myUserId(): string | null {
-    return this.rootStore?.authStore?.currentUser?.id || this.myPlayerId;
+    // Prioritize myPlayerId since that's what the backend uses in match events
+    return this.myPlayerId || this.rootStore?.authStore?.currentUser?.id;
   }
 
   // Keep compatibility with existing code
@@ -671,6 +940,9 @@ export class MatchStore {
   isAnswerDisabled(questionIndex: number): boolean {
     // Disable if already answered this question (fast-click prevention)
     if (this.answeredQuestions.has(questionIndex)) {
+      return true;
+    }
+    if (this.submittingForIndex === questionIndex) {
       return true;
     }
     // Disable if frozen (but don't block page interaction)  
@@ -744,12 +1016,49 @@ export class MatchStore {
   }
 
   get myFreezeCountdown(): number | null {
-    const myUserId = this.myUserId;
-    return myUserId && this.freezeCountdowns[myUserId] ? this.freezeCountdowns[myUserId] : null;
+    const candidateIds = new Set<string>();
+    if (this.myUserId) candidateIds.add(this.myUserId);
+    if (this.myPlayerId) candidateIds.add(this.myPlayerId);
+    const authId = this.rootStore?.authStore?.currentUser?.id;
+    if (authId) candidateIds.add(String(authId));
+
+    for (const id of candidateIds) {
+      const seconds = this.freezeCountdowns.get(id);
+      if (typeof seconds === 'number') {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('✅ myFreezeCountdown resolved for', id, '=', seconds);
+        }
+        return seconds;
+      }
+    }
+
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('❌ myFreezeCountdown not found for ids:', Array.from(candidateIds), 'keys:', Array.from(this.freezeCountdowns.keys()));
+    }
+
+    return null;
   }
 
   get opponentFreezeCountdown(): number | null {
     const opponentUserId = this.opponentUserId;
-    return opponentUserId && this.freezeCountdowns[opponentUserId] ? this.freezeCountdowns[opponentUserId] : null;
+    if (!opponentUserId) return null;
+    const val = this.freezeCountdowns.get(opponentUserId);
+    return typeof val === 'number' ? val : null;
+  }
+
+  get myFreezeTotalDuration(): number | null {
+    const candidateIds = new Set<string>();
+    if (this.myUserId) candidateIds.add(this.myUserId);
+    if (this.myPlayerId) candidateIds.add(this.myPlayerId);
+    const authId = this.rootStore?.authStore?.currentUser?.id;
+    if (authId) candidateIds.add(String(authId));
+
+    for (const id of candidateIds) {
+      if (this.freezeTotalDurations.has(id)) {
+        return this.freezeTotalDurations.get(id) ?? null;
+      }
+    }
+
+    return null;
   }
 }

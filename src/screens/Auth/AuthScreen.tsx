@@ -10,17 +10,24 @@ import {
 } from 'react-native';
 import { observer } from 'mobx-react-lite';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { OAuthButtonGroup } from '../../components/auth/OAuthButton';
 import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
 import { useOAuth } from '../../hooks/useOAuth';
+import type { RootStackParamList } from '../../navigation/types';
+
+type AuthScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Auth'>;
 
 export const AuthScreen: React.FC = observer(() => {
+  const navigation = useNavigation<AuthScreenNavigationProp>();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -38,19 +45,29 @@ export const AuthScreen: React.FC = observer(() => {
     const newErrors: Record<string, string> = {};
 
     if (!email.trim()) {
-      newErrors.email = 'Email is required';
+      newErrors.email = 'Please enter your email address';
     } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Email is invalid';
+      newErrors.email = 'Please enter a valid email address';
     }
 
     if (!password.trim()) {
-      newErrors.password = 'Password is required';
+      newErrors.password = 'Please enter your password';
     } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
+      newErrors.password = 'Password must be at least 6 characters long';
+    }
+
+    if (!isLogin && !confirmPassword.trim()) {
+      newErrors.confirmPassword = 'Please confirm your password';
+    } else if (!isLogin && password !== confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
     }
 
     if (!isLogin && !username.trim()) {
-      newErrors.username = 'Username is required';
+      newErrors.username = 'Please choose a username';
+    } else if (!isLogin && username.trim().length < 3) {
+      newErrors.username = 'Username must be at least 3 characters long';
+    } else if (!isLogin && !/^[a-zA-Z0-9_]+$/.test(username.trim())) {
+      newErrors.username = 'Username can only contain letters, numbers, and underscores';
     }
 
     setErrors(newErrors);
@@ -63,12 +80,84 @@ export const AuthScreen: React.FC = observer(() => {
     try {
       if (isLogin) {
         await authStore.login({ email, password });
+        uiStore.showToast('Welcome back to CodeAndClash! 🎉', 'success');
       } else {
-        await authStore.register({ username, email, password });
+        const response = await authStore.register({ username, email, password });
+        
+        // Check if email verification is required
+        if (response && response.emailSent) {
+          uiStore.showToast('Registration successful! Please check your email to verify your account. 📧', 'success');
+          navigation.navigate('EmailVerification', { email, fromRegistration: true });
+          return;
+        } else {
+          uiStore.showToast('Account created successfully! Welcome to CodeAndClash! 🚀', 'success');
+        }
       }
-      uiStore.showToast('Welcome to Coding War!', 'success');
     } catch (error: any) {
-      uiStore.showToast(error.message || 'Authentication failed', 'error');
+      console.log('Auth error:', error);
+      console.log('Response data:', error?.response?.data);
+      console.log('Response data stringified:', JSON.stringify(error?.response?.data, null, 2));
+      console.log('Response status:', error?.response?.status);
+      console.log('Is login mode:', isLogin);
+      console.log('responseData?.errors exists?', !!error?.response?.data?.errors);
+      console.log('responseData?.errors value:', error?.response?.data?.errors);
+      
+      // Handle structured field errors from backend (NEW IMPROVED VERSION)
+      const responseData = error?.response?.data;
+      if (!isLogin && error?.response?.status === 400) {
+        
+        // Check for new structured format first
+        if (responseData?.errors) {
+          console.log('✅ Backend sent structured field errors:', responseData.errors);
+          setErrors(prev => ({ ...prev, ...responseData.errors }));
+          
+          const errorFields = Object.keys(responseData.errors);
+          if (errorFields.includes('email')) {
+            uiStore.showToast('This email is already registered. Please use a different email or try logging in.', 'error');
+          } else if (errorFields.includes('username')) {
+            uiStore.showToast('This username is already taken. Please choose a different username.', 'error');
+          } else {
+            uiStore.showToast('Please fix the errors highlighted below and try again.', 'error');
+          }
+          return;
+        }
+        
+        // Handle old format: {"message": "User already exists"}
+        else if (responseData?.message === 'User already exists') {
+          console.log('⚠️ Backend sent old format - checking both email and username');
+          setErrors(prev => ({
+            ...prev,
+            email: 'This email may already be registered.',
+            username: 'This username may already be taken.'
+          }));
+          uiStore.showToast('An account with this email or username already exists. Please try different values.', 'error');
+          return;
+        }
+      }
+      
+      // Handle login errors specifically
+      if (isLogin && error?.response?.status === 401) {
+        uiStore.showToast('Invalid email or password. Please check your credentials and try again.', 'error');
+        return;
+      }
+
+      // Handle email verification errors
+      if (isLogin && error?.response?.status === 403 && error?.response?.data?.error === 'email_not_verified') {
+        uiStore.showToast('Please verify your email address before logging in. Check your inbox for the verification link.', 'error');
+        navigation.navigate('EmailVerification', { email });
+        return;
+      }
+      
+      // Handle network errors
+      if (!error?.response) {
+        uiStore.showToast('Connection error. Please check your internet connection and try again.', 'error');
+        return;
+      }
+      
+      console.log('❌ No structured errors detected, falling back to general error');
+      // Fall back to general error for other cases
+      const errorMessage = responseData?.message || error.message || 'Something went wrong. Please try again.';
+      uiStore.showToast(errorMessage, 'error');
     }
   };
 
@@ -76,12 +165,14 @@ export const AuthScreen: React.FC = observer(() => {
     try {
       if (provider === 'google') {
         await authenticateWithGoogle();
+        uiStore.showToast('Successfully signed in with Google! 🎉', 'success');
       } else if (provider === 'github') {
         await authenticateWithGitHub();
+        uiStore.showToast('Successfully signed in with GitHub! 🎉', 'success');
       }
     } catch (error: any) {
       console.error(`OAuth ${provider} error:`, error);
-      // Error handling is done in the useOAuth hook
+      uiStore.showToast(`Failed to sign in with ${provider}. Please try again or use email/password.`, 'error');
     }
   };
 
@@ -96,7 +187,7 @@ export const AuthScreen: React.FC = observer(() => {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <Text style={styles.title}>⚔️ Coding War</Text>
+            <Text style={styles.title}>⚔️ CodeAndClash</Text>
             <Text style={styles.subtitle}>
               {isLogin ? 'Welcome back!' : 'Create your account'}
             </Text>
@@ -108,7 +199,13 @@ export const AuthScreen: React.FC = observer(() => {
                 label="Username"
                 placeholder="Enter your username"
                 value={username}
-                onChangeText={setUsername}
+                onChangeText={(text) => {
+                  setUsername(text);
+                  // Clear username error when user starts typing
+                  if (errors.username) {
+                    setErrors(prev => ({ ...prev, username: '' }));
+                  }
+                }}
                 error={errors.username}
                 autoCapitalize="none"
               />
@@ -118,7 +215,13 @@ export const AuthScreen: React.FC = observer(() => {
               label="Email"
               placeholder="Enter your email"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(text) => {
+                setEmail(text);
+                // Clear email error when user starts typing
+                if (errors.email) {
+                  setErrors(prev => ({ ...prev, email: '' }));
+                }
+              }}
               error={errors.email}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -128,10 +231,41 @@ export const AuthScreen: React.FC = observer(() => {
               label="Password"
               placeholder="Enter your password"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(text) => {
+                setPassword(text);
+                // Clear password error when user starts typing
+                if (errors.password) {
+                  setErrors(prev => ({ ...prev, password: '' }));
+                }
+                // Also clear confirm password error if they match now
+                if (!isLogin && confirmPassword && text === confirmPassword && errors.confirmPassword) {
+                  setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                }
+              }}
               error={errors.password}
               secureTextEntry
             />
+
+            {!isLogin && (
+              <Input
+                label="Confirm Password"
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChangeText={(text) => {
+                  setConfirmPassword(text);
+                  // Clear confirm password error when user starts typing
+                  if (errors.confirmPassword) {
+                    setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                  }
+                  // Also clear error if passwords match now
+                  if (password && text === password && errors.confirmPassword) {
+                    setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                  }
+                }}
+                error={errors.confirmPassword}
+                secureTextEntry
+              />
+            )}
 
             <Button
               title={isLogin ? 'Login' : 'Register'}
@@ -158,6 +292,10 @@ export const AuthScreen: React.FC = observer(() => {
               onPress={() => {
                 setIsLogin(!isLogin);
                 setErrors({});
+                // Clear confirm password when switching to login mode
+                if (!isLogin) {
+                  setConfirmPassword('');
+                }
               }}
               style={styles.switchButton}
             >

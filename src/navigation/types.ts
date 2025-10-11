@@ -1,5 +1,6 @@
 export type RootStackParamList = {
   Auth: undefined;
+  EmailVerification: { email: string; fromRegistration?: boolean };
   Main: undefined;
   MatchLobby: undefined;
   Match: undefined;

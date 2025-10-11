@@ -3,6 +3,7 @@ import { apiService } from '../services/api.service';
 import { User, LeaderboardEntry } from '../types/user.types';
 
 export class UserStore {
+  rootStore: any = null;
   user: User | null = null;
   leaderboard: LeaderboardEntry[] = [];
   isLoading = false;
@@ -30,6 +31,20 @@ export class UserStore {
         this.isLoading = false;
       });
     } catch (error: any) {
+      const status = error?.response?.status;
+      if (status === 401 || status === 403) {
+        try {
+          await this.rootStore?.authStore?.forceLogout?.('SESSION_EXPIRED');
+        } catch (logoutError) {
+          console.warn('Failed to force logout after unauthorized profile fetch:', logoutError);
+        }
+        runInAction(() => {
+          this.error = 'Session expired. Please sign in again.';
+          this.isLoading = false;
+        });
+        return;
+      }
+
       runInAction(() => {
         this.error = error.message;
         this.isLoading = false;

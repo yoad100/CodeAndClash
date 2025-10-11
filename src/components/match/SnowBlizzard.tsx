@@ -4,6 +4,7 @@ import { COLORS } from '../../constants/colors';
 
 interface SnowBlizzardProps {
   countdown: number;
+  playerName?: string;
   onComplete?: () => void;
 }
 
@@ -17,17 +18,36 @@ interface Snowflake {
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-export const SnowBlizzard: React.FC<SnowBlizzardProps> = ({ countdown, onComplete }) => {
+export const SnowBlizzard: React.FC<SnowBlizzardProps> = ({ countdown, playerName = 'You', onComplete }) => {
   const snowflakes = useRef<Snowflake[]>([]);
   const animationRefs = useRef<Animated.CompositeAnimation[]>([]);
   const countdownPulse = useRef(new Animated.Value(1)).current;
   const blizzardOpacity = useRef(new Animated.Value(0)).current;
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+  const messageScale = useRef(new Animated.Value(0.8)).current;
   
   // Animate entrance
   useEffect(() => {
+    // Fade in overlay
     Animated.timing(blizzardOpacity, {
       toValue: 1,
       duration: 800,
+      useNativeDriver: true,
+    }).start();
+    
+    // Shake effect for freeze impact
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 5, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+    ]).start();
+    
+    // Pop in message box
+    Animated.spring(messageScale, {
+      toValue: 1,
+      tension: 50,
+      friction: 7,
       useNativeDriver: true,
     }).start();
   }, []);
@@ -139,7 +159,7 @@ export const SnowBlizzard: React.FC<SnowBlizzardProps> = ({ countdown, onComplet
   }, [countdown, onComplete]);
 
   return (
-    <Animated.View style={[styles.container, { opacity: blizzardOpacity }]}>
+    <Animated.View style={[styles.container, { opacity: blizzardOpacity, transform: [{ translateX: shakeAnim }] }]}>
       {/* Snow particles */}
       {snowflakes.current.map((flake, index) => (
         <Animated.View
@@ -165,22 +185,25 @@ export const SnowBlizzard: React.FC<SnowBlizzardProps> = ({ countdown, onComplet
       {/* Additional wind effect overlay */}
       <View style={styles.windOverlay} />
       
-      {/* Countdown display */}
-      <View style={styles.countdownContainer}>
-        <Text style={styles.frozenLabel}>FROZEN</Text>
-        <Animated.Text 
-          style={[
-            styles.countdownText, 
-            { 
-              transform: [{ scale: countdownPulse }],
-              color: countdown <= 3 ? '#FF4444' : '#0066CC' // Red when urgent
-            }
-          ]}
-        >
-          {countdown}
-        </Animated.Text>
-        <Text style={styles.secondsLabel}>seconds</Text>
+      {/* Ice crystals decoration */}
+      <View style={styles.iceDecoration}>
+        <Text style={styles.iceCrystal}>❅</Text>
+        <Text style={[styles.iceCrystal, styles.iceCrystal2]}>❆</Text>
+        <Text style={[styles.iceCrystal, styles.iceCrystal3]}>❅</Text>
+        <Text style={[styles.iceCrystal, styles.iceCrystal4]}>❆</Text>
       </View>
+      
+      {/* Freeze message box */}
+      <Animated.View style={[styles.messageContainer, { transform: [{ scale: messageScale }] }]}>
+        <Animated.View style={{ transform: [{ scale: countdownPulse }] }}>
+          <Text style={styles.frozenTitle}>❄️ FROZEN ❄️</Text>
+          <Text style={styles.frozenSubtitle}>{playerName} answered incorrectly</Text>
+          <View style={styles.countdownBox}>
+            <Text style={styles.countdownText}>{countdown}</Text>
+            <Text style={styles.secondsLabel}>seconds</Text>
+          </View>
+        </Animated.View>
+      </Animated.View>
     </Animated.View>
   );
 };
@@ -223,41 +246,83 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(173, 216, 230, 0.03)',
   },
-  countdownContainer: {
+  iceDecoration: {
     position: 'absolute',
-    top: '40%',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
   },
-  frozenLabel: {
+  iceCrystal: {
+    position: 'absolute',
     fontSize: 24,
-    fontWeight: '800',
-    color: '#1E90FF', // Dodger blue
-    letterSpacing: 4,
-    textShadowColor: 'rgba(255, 255, 255, 0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-    marginBottom: 10,
+    color: 'rgba(255, 255, 255, 0.6)',
+    textShadowColor: 'rgba(135, 206, 235, 0.8)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  iceCrystal2: {
+    top: '20%',
+    right: '10%',
+    fontSize: 20,
+  },
+  iceCrystal3: {
+    bottom: '25%',
+    left: '15%',
+    fontSize: 18,
+  },
+  iceCrystal4: {
+    top: '60%',
+    right: '20%',
+    fontSize: 22,
+  },
+  messageContainer: {
+    position: 'absolute',
+    top: '35%',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 50, 100, 0.9)',
+    padding: 30,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#87CEEB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+    minWidth: 250,
+  },
+  frozenTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#87CEEB',
+    textAlign: 'center',
+    marginBottom: 8,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  frozenSubtitle: {
+    fontSize: 14,
+    color: '#B0E0E6',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  countdownBox: {
+    alignItems: 'center',
   },
   countdownText: {
-    fontSize: 72,
+    fontSize: 48,
     fontWeight: '900',
-    color: '#0066CC', // Strong blue
-    textShadowColor: 'rgba(255, 255, 255, 0.9)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 6,
-    lineHeight: 80,
+    color: 'white',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
   },
   secondsLabel: {
-    fontSize: 18,
+    fontSize: 14,
+    color: '#B0E0E6',
+    marginTop: 4,
     fontWeight: '600',
-    color: '#4169E1', // Royal blue
-    letterSpacing: 2,
-    textShadowColor: 'rgba(255, 255, 255, 0.7)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-    marginTop: 5,
   },
 });

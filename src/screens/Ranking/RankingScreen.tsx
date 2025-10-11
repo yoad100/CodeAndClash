@@ -16,6 +16,15 @@ import { LeaderboardEntry } from '../../types/user.types';
 
 export const RankingScreen: React.FC = observer(() => {
   const { userStore, uiStore } = rootStore;
+  const user = userStore.user;
+  const derivedRank = React.useMemo(() => {
+    if (userStore.userRank > 0) {
+      return userStore.userRank;
+    }
+    if (!user) return null;
+    const index = userStore.leaderboard.findIndex((entry) => entry.username === user.username);
+    return index >= 0 ? index + 1 : null;
+  }, [userStore.userRank, userStore.leaderboard, user]);
 
   useEffect(() => {
     loadAll();
@@ -98,16 +107,19 @@ export const RankingScreen: React.FC = observer(() => {
       </View>
 
       {/* My Rank Card */}
-      {userStore.user && (
-        <View style={styles.myRankCard} accessible accessibilityLabel={`Your rank ${userStore.userRank}, rating ${userStore.userRating}`}>
+      {user && (
+        <View style={styles.myRankCard} accessible accessibilityLabel={`Your rank ${derivedRank ?? 'not ranked'}, rating ${userStore.userRating}`}>
           <View style={styles.myRankLeft}>
             <Text style={styles.myRankTitle}>Your Rank</Text>
-            <Text style={styles.myRankValue}>#{userStore.userRank || '—'}</Text>
+            <Text style={styles.myRankValue}>{derivedRank ? `#${derivedRank}` : '—'}</Text>
+            {!derivedRank && (
+              <Text style={styles.unrankedHint}>Play matches to place on the board</Text>
+            )}
           </View>
           <View style={styles.myRankRight}>
             <Text style={styles.myRatingLabel}>Rating</Text>
             <Text style={styles.myRatingValue}>{userStore.userRating}</Text>
-            <Text style={styles.myWL}>{(userStore.user?.wins ?? 0)}W / {(userStore.user?.losses ?? 0)}L</Text>
+            <Text style={styles.myWL}>{(user?.wins ?? 0)}W / {(user?.losses ?? 0)}L</Text>
           </View>
         </View>
       )}
@@ -177,6 +189,7 @@ const styles = StyleSheet.create({
   myRankRight: { alignItems: 'flex-end' },
   myRankTitle: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 },
   myRankValue: { color: COLORS.text, fontSize: 24, fontWeight: '800' },
+  unrankedHint: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
   myRatingLabel: { color: COLORS.textSecondary, fontSize: 12 },
   myRatingValue: { color: COLORS.secondary, fontSize: 20, fontWeight: '700' },
   myWL: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },

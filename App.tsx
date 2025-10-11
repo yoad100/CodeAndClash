@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StatusBar, View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { observer } from 'mobx-react-lite';
+import { configure } from 'mobx';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { Toast } from './src/components/common/Toast';
 import { LoadingSpinner } from './src/components/common/LoadingSpinner';
@@ -11,7 +12,31 @@ import { ConnectionBanner } from './src/components/common/ConnectionBanner';
 import { QueuedModal } from './src/components/common/QueuedModal';
 import { NeonBackground } from './src/components/fx/NeonBackground';
 
-const App: React.FC = observer(() => {
+// Configure MobX once at module load. Using non-proxy mode avoids RN Fabric/Animated mutation issues.
+configure({ disableErrorBoundaries: false, enforceActions: 'never', useProxies: 'never' });
+
+const ToastHost: React.FC = observer(() => {
+  const { uiStore } = rootStore;
+  return (
+    <>
+      {uiStore.toasts.map((toast) => (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => uiStore.removeToast(toast.id)}
+          actionLabel={toast.actionLabel}
+          onAction={() => {
+            try { toast.action && toast.action(); } catch (e) { /* ignore */ }
+            uiStore.removeToast(toast.id);
+          }}
+        />
+      ))}
+    </>
+  );
+});
+
+const App: React.FC = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const { uiStore } = rootStore;
 
@@ -68,23 +93,11 @@ const App: React.FC = observer(() => {
         {/* Keep modals/toasts above background overlay */}
         <QueuedModal />
         {/* Toast Notifications */}
-        {uiStore.toasts.map((toast) => (
-          <Toast
-            key={toast.id}
-            message={toast.message}
-            type={toast.type}
-            onClose={() => uiStore.removeToast(toast.id)}
-            actionLabel={toast.actionLabel}
-            onAction={() => {
-              try { toast.action && toast.action(); } catch (e) { /* ignore */ }
-              uiStore.removeToast(toast.id);
-            }}
-          />
-        ))}
+        <ToastHost />
       </View>
     </SafeAreaProvider>
   );
-});
+};
 
 const styles = StyleSheet.create({
   container: {
