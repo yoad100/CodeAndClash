@@ -4,6 +4,11 @@ export interface MatchPlayer {
   score: number;
   isFrozen?: boolean;
   currentQuestionIndex?: number;
+  avatar?: string;
+  levelName?: string;
+  levelKey?: string;
+  levelIndex?: number;
+  rating?: number;
 }
 
 export interface Question {

@@ -25,6 +25,7 @@ import { navigationRef } from '../utils/navigationRef';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { useNavigation } from '@react-navigation/native';
 import { IncomingInviteDialog } from '../components/match/IncomingInviteDialog';
+import { LevelBadge } from '../components/common/LevelBadge';
 
 // Types
 import { RootStackParamList, MainTabParamList } from './types';
@@ -137,9 +138,12 @@ const MainTabs: React.FC = observer(() => {
           </View>
 
           <View style={headerStyles.infoColumn}>
-            <Text style={headerStyles.username} numberOfLines={1}>
-              {user?.username ?? 'Guest'}
-            </Text>
+            <View style={headerStyles.usernameRow}>
+              <Text style={headerStyles.username} numberOfLines={1}>
+                {user?.username ?? 'Guest'}
+              </Text>
+              <LevelBadge levelName={user?.levelName} levelKey={user?.levelKey} compact />
+            </View>
             <View style={headerStyles.pillRow}>
               <View style={[headerStyles.statusPill, { borderColor: status.color, backgroundColor: `${status.color}22` }]}>
                 <Ionicons
@@ -154,12 +158,6 @@ const MainTabs: React.FC = observer(() => {
                 <Ionicons name="sparkles" size={13} color={COLORS.warning} style={headerStyles.pillIcon} />
                 <Text style={[headerStyles.pillText, { color: COLORS.white }]}>{user?.rating ?? '—'}</Text>
               </View>
-              {user?.isPremium && (
-                <View style={headerStyles.statPill}>
-                  <Ionicons name="star" size={13} color={COLORS.warning} style={headerStyles.pillIcon} />
-                  <Text style={[headerStyles.pillText, { color: COLORS.white }]}>Premium</Text>
-                </View>
-              )}
             </View>
           </View>
 
@@ -427,11 +425,19 @@ const headerStyles = StyleSheet.create({
   },
   infoColumn: {
     flex: 1,
+    minWidth: 0,
   },
   username: {
     color: COLORS.white,
     fontSize: 16,
     fontWeight: '700',
+    flexShrink: 1,
+  },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
   },
   pillRow: {
     flexDirection: 'row',

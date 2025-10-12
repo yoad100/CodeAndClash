@@ -1,6 +1,7 @@
 import { makeAutoObservable, runInAction } from 'mobx';
 import { apiService } from '../services/api.service';
 import { User, LeaderboardEntry } from '../types/user.types';
+import { buildLevelBreakpoints, getLevelByRank } from '../constants/levels';
 
 export class UserStore {
   rootStore: any = null;
@@ -58,16 +59,25 @@ export class UserStore {
 
     try {
       const response = await apiService.getTopPlayers();
-      // backend returns { data: users[] } with fields: username, rating, wins, losses, avatar
       const users = (response.data?.data || response.data || []) as Array<any>;
-      const entries: LeaderboardEntry[] = users.map((u: any, idx: number) => ({
-        username: String(u.username || 'Unknown'),
-        avatar: u.avatar || undefined,
-        rank: idx + 1,
-        rating: typeof u.rating === 'number' ? u.rating : 1000,
-        wins: typeof u.wins === 'number' ? u.wins : 0,
-        losses: typeof u.losses === 'number' ? u.losses : 0,
-      }));
+      const totalPlayers = Number(response.data?.meta?.totalPlayers) || users.length || this.leaderboard.length;
+      const breakpoints = buildLevelBreakpoints(totalPlayers);
+
+      const entries: LeaderboardEntry[] = users.map((u: any, idx: number) => {
+        const rank = typeof u.rank === 'number' ? u.rank : idx + 1;
+        const levelTheme = getLevelByRank(rank, totalPlayers, breakpoints);
+        return {
+          username: String(u.username || 'Unknown'),
+          avatar: u.avatar || undefined,
+          rank,
+          rating: typeof u.rating === 'number' ? u.rating : 1000,
+          wins: typeof u.wins === 'number' ? u.wins : 0,
+          losses: typeof u.losses === 'number' ? u.losses : 0,
+          levelName: typeof u.levelName === 'string' ? u.levelName : levelTheme.name,
+          levelKey: typeof u.levelKey === 'string' ? u.levelKey : levelTheme.key,
+          levelIndex: typeof u.levelIndex === 'number' ? u.levelIndex : levelTheme.tier,
+        };
+      });
       runInAction(() => {
         this.leaderboard = entries;
         this.isLoading = false;

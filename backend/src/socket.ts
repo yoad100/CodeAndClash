@@ -4,6 +4,7 @@ import { Match } from './models/match.model';
 import { Question } from './models/question.model';
 import { User } from './models/user.model';
 import { updateScore } from './services/leaderboard.redis';
+import { calculateLevelAwareRatingDelta, DEFAULT_LEVEL, syncUserLevel } from './services/level.service';
 import jwt from 'jsonwebtoken';
 import redis from './services/redis.client';
 import { scheduleJob, cancelJobs } from './services/scheduler.redis';
@@ -27,6 +28,48 @@ const truncate = (value: string, max = 80) => {
   if (!value) return value;
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 };
+
+async function loadUserLevelMetadata(userId?: string) {
+  if (!userId || !isObjectId(String(userId))) {
+    return {
+      avatar: undefined,
+      levelName: DEFAULT_LEVEL.name,
+      levelKey: DEFAULT_LEVEL.key,
+      levelIndex: DEFAULT_LEVEL.index,
+      rating: 1000,
+    };
+  }
+
+  try {
+    const doc = await User.findById(userId).select('avatar levelName levelKey levelIndex rating username levelUpdatedAt');
+    if (!doc) {
+      return {
+        avatar: undefined,
+        levelName: DEFAULT_LEVEL.name,
+        levelKey: DEFAULT_LEVEL.key,
+        levelIndex: DEFAULT_LEVEL.index,
+        rating: 1000,
+      };
+    }
+    const { level } = await syncUserLevel(doc);
+    return {
+      avatar: doc.avatar || undefined,
+      levelName: level.name,
+      levelKey: level.key,
+      levelIndex: level.index,
+      rating: typeof doc.rating === 'number' ? doc.rating : 1000,
+    };
+  } catch (err) {
+    logger.warn('loadUserLevelMetadata failed for %s: %o', userId, err);
+    return {
+      avatar: undefined,
+      levelName: DEFAULT_LEVEL.name,
+      levelKey: DEFAULT_LEVEL.key,
+      levelIndex: DEFAULT_LEVEL.index,
+      rating: 1000,
+    };
+  }
+}
 
 async function hydrateMatchState(matchId: string) {
   try {
@@ -230,19 +273,72 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
   await match.save();
 
   // Update DB user stats and Redis leaderboard (only for real users with ObjectId-like ids)
-  for (const p of match.players as any[]) {
-    if (!isObjectId(String(p.userId))) continue;
-    const u = await User.findById(p.userId);
-    if (!u) continue;
-    if (String(p.userId) === String(winnerId)) {
-      u.wins = (u.wins || 0) + 1;
+  const realPlayerIds = (match.players as any[])
+    .filter((p) => p && isObjectId(String(p.userId)))
+    .map((p) => String(p.userId));
+
+  const userDocs = realPlayerIds.length
+    ? await User.find({ _id: { $in: realPlayerIds } })
+    : [];
+  const userMap = new Map<string, typeof userDocs[number]>();
+  userDocs.forEach((doc) => userMap.set(String(doc._id), doc));
+
+  let ratingDelta = 0;
+  let loserId: string | null = null;
+
+  if (winnerId && realPlayerIds.length === 2) {
+    loserId = realPlayerIds.find((id) => id !== String(winnerId)) || null;
+    const winnerDoc = userMap.get(String(winnerId));
+    const loserDoc = loserId ? userMap.get(loserId) : undefined;
+    if (winnerDoc && loserDoc) {
+      ratingDelta = calculateLevelAwareRatingDelta(
+        typeof winnerDoc.levelIndex === 'number' ? winnerDoc.levelIndex : undefined,
+        typeof loserDoc.levelIndex === 'number' ? loserDoc.levelIndex : undefined
+      );
     } else {
-      u.losses = (u.losses || 0) + 1;
+      ratingDelta = 2;
     }
-    // simple rating update: +10 for win, -5 for loss
-    u.rating = (u.rating || 1000) + (String(p.userId) === String(winnerId) ? 10 : -5);
-    await u.save();
-    await updateScore(String(u._id), u.rating);
+  }
+
+  for (const p of match.players as any[]) {
+    const playerId = String(p.userId);
+    const doc = userMap.get(playerId);
+    if (!doc) continue;
+
+    if (winnerId && String(playerId) === String(winnerId)) {
+      doc.wins = (doc.wins || 0) + 1;
+      if (ratingDelta > 0) {
+        doc.rating = Math.max(100, (doc.rating || 1000) + ratingDelta);
+      }
+    } else if (winnerId && loserId && String(playerId) === String(loserId)) {
+      doc.losses = (doc.losses || 0) + 1;
+      if (ratingDelta > 0) {
+        doc.rating = Math.max(100, (doc.rating || 1000) - ratingDelta);
+      }
+    } else {
+      // Draw or unresolved winner
+      doc.losses = doc.losses || 0;
+      doc.wins = doc.wins || 0;
+    }
+
+    const { level } = await syncUserLevel(doc, { persist: false });
+    await doc.save();
+    await updateScore(String(doc._id), doc.rating || 1000);
+
+    // Update cached match player metadata
+    p.avatar = doc.avatar || p.avatar;
+    p.levelName = level.name;
+    p.levelKey = level.key;
+    p.levelIndex = level.index;
+  }
+
+  try {
+    if (typeof match.markModified === 'function') {
+      match.markModified('players');
+    }
+    await match.save();
+  } catch (err) {
+    logger.warn('Failed to persist updated match player metadata for %s: %o', match._id, err);
   }
 
   // emit matchEnded with winner and scores to the room
@@ -253,6 +349,10 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
     username: p.username,
     score: p.score || 0,
     isFrozen: !!p.isFrozen,
+    avatar: p.avatar,
+    levelName: p.levelName || DEFAULT_LEVEL.name,
+    levelKey: p.levelKey || DEFAULT_LEVEL.key,
+    levelIndex: typeof p.levelIndex === 'number' ? p.levelIndex : DEFAULT_LEVEL.index,
   }));
   io.to(`match:${match._id}`).emit('matchEnded', { matchId: String(match._id), winnerId: winnerId ? String(winnerId) : null, players: normPlayers });
   
@@ -306,10 +406,29 @@ export function initSocket(server: HttpServer) {
   async function createMatchForParticipants(p1: Participant, p2: Participant, subject: string) {
     const { questions, subject: resolvedSubject } = await loadQuestionsForSubject(subject);
 
+    const [p1Meta, p2Meta] = await Promise.all([
+      loadUserLevelMetadata(p1.userId),
+      loadUserLevelMetadata(p2.userId),
+    ]);
+
     const match = await Match.create({
       players: [
-        { userId: p1.userId, username: p1.username },
-        { userId: p2.userId, username: p2.username },
+        {
+          userId: p1.userId,
+          username: p1.username,
+          avatar: p1Meta.avatar,
+          levelName: p1Meta.levelName,
+          levelKey: p1Meta.levelKey,
+          levelIndex: p1Meta.levelIndex,
+        },
+        {
+          userId: p2.userId,
+          username: p2.username,
+          avatar: p2Meta.avatar,
+          levelName: p2Meta.levelName,
+          levelKey: p2Meta.levelKey,
+          levelIndex: p2Meta.levelIndex,
+        },
       ],
       subject: resolvedSubject === 'any' ? undefined : resolvedSubject,
       questions: questions.map((q: any) => q._id),
@@ -343,14 +462,46 @@ export function initSocket(server: HttpServer) {
   const subjectPayload = resolvedSubject === 'any' ? undefined : resolvedSubject;
     io.to(p1.socketId).emit('matchFound', {
       matchId: match._id,
-      player: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'You' },
-      opponent: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'Opponent' },
+      player: {
+        id: String(p1.userId || `guest:${p1.socketId}`),
+        username: p1.username || 'You',
+        avatar: p1Meta.avatar,
+        levelName: p1Meta.levelName,
+        levelKey: p1Meta.levelKey,
+        levelIndex: p1Meta.levelIndex,
+        rating: p1Meta.rating,
+      },
+      opponent: {
+        id: String(p2.userId || `guest:${p2.socketId}`),
+        username: p2.username || 'Opponent',
+        avatar: p2Meta.avatar,
+        levelName: p2Meta.levelName,
+        levelKey: p2Meta.levelKey,
+        levelIndex: p2Meta.levelIndex,
+        rating: p2Meta.rating,
+      },
       subject: subjectPayload,
     });
     io.to(p2.socketId).emit('matchFound', {
       matchId: match._id,
-      player: { id: String(p2.userId || `guest:${p2.socketId}`), username: p2.username || 'You' },
-      opponent: { id: String(p1.userId || `guest:${p1.socketId}`), username: p1.username || 'Opponent' },
+      player: {
+        id: String(p2.userId || `guest:${p2.socketId}`),
+        username: p2.username || 'You',
+        avatar: p2Meta.avatar,
+        levelName: p2Meta.levelName,
+        levelKey: p2Meta.levelKey,
+        levelIndex: p2Meta.levelIndex,
+        rating: p2Meta.rating,
+      },
+      opponent: {
+        id: String(p1.userId || `guest:${p1.socketId}`),
+        username: p1.username || 'Opponent',
+        avatar: p1Meta.avatar,
+        levelName: p1Meta.levelName,
+        levelKey: p1Meta.levelKey,
+        levelIndex: p1Meta.levelIndex,
+        rating: p1Meta.rating,
+      },
       subject: subjectPayload,
     });
 

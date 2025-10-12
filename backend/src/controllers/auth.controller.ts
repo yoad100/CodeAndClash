@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { User } from '../models/user.model';
 import { RefreshToken } from '../models/refreshToken.model';
 import { emailService } from '../services/email.service';
+import { buildLevelBreakpoints, getLevelByRank } from '../services/level.service';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '900s';
@@ -92,7 +93,15 @@ export const register = async (req: Request, res: Response) => {
           id: user.id, 
           username: user.username,
           email: user.email,
-          isEmailVerified: true
+          isEmailVerified: true,
+          rating: user.rating,
+          wins: user.wins,
+          losses: user.losses,
+          levelName: user.levelName,
+          levelKey: user.levelKey,
+          levelIndex: user.levelIndex,
+          avatar: user.avatar,
+          isPremium: user.isPremium,
         }
       });
     }
@@ -126,6 +135,19 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    const totalPlayers = await User.countDocuments({});
+    const breakpoints = buildLevelBreakpoints(totalPlayers);
+    const higherRanked = await User.countDocuments({ rating: { $gt: user.rating } });
+    const computedLevel = getLevelByRank(higherRanked + 1, totalPlayers, breakpoints);
+
+    if (user.levelKey !== computedLevel.key || user.levelIndex !== computedLevel.index) {
+      user.levelName = computedLevel.name;
+      user.levelKey = computedLevel.key;
+      user.levelIndex = computedLevel.index;
+      user.levelUpdatedAt = new Date();
+      await user.save();
+    }
+
     const accessToken = (jwt.sign as any)({ sub: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     const refreshToken = (jwt.sign as any)({ sub: user.id }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
 
@@ -140,7 +162,13 @@ export const login = async (req: Request, res: Response) => {
         email: user.email,
         isEmailVerified: user.isEmailVerified,
         rating: user.rating,
-        isPremium: user.isPremium
+        wins: user.wins,
+        losses: user.losses,
+        levelName: user.levelName,
+        levelKey: user.levelKey,
+        levelIndex: user.levelIndex,
+        avatar: user.avatar,
+        isPremium: user.isPremium,
       }
     });
   } catch (error) {

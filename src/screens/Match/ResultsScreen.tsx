@@ -36,9 +36,9 @@ const ConfettiBurst: React.FC<{ onComplete?: () => void }> = ({ onComplete }) =>
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../../constants/colors';
 import { observer } from 'mobx-react-lite';
-import { Button } from '../../components/common/Button';
 import { rootStore } from '../../stores/RootStore';
 import { ArcadeButton } from '../../components/fx/ArcadeButton';
+import { LevelBadge } from '../../components/common/LevelBadge';
 
 export const ResultsScreen: React.FC = observer(() => {
   const { matchStore } = rootStore;
@@ -93,7 +93,12 @@ export const ResultsScreen: React.FC = observer(() => {
                 <View style={[styles.avatar, p.id === myId ? styles.avatarYou : undefined]}>
                   <Text style={styles.avatarText}>{(p.username || 'U')[0]?.toUpperCase?.() || 'U'}</Text>
                 </View>
-                <Text style={styles.playerName}>{p.id === (myId || '') ? 'You' : p.username}</Text>
+                <View>
+                  <Text style={styles.playerName}>{p.id === (myId || '') ? 'You' : p.username}</Text>
+                  <View style={styles.badgeSlot}>
+                    <LevelBadge levelName={p.levelName} levelKey={p.levelKey} compact />
+                  </View>
+                </View>
               </View>
               <Text style={[styles.playerScore, p.id === myId ? styles.playerScoreYou : undefined]}>{p.score}</Text>
             </View>
@@ -138,7 +143,8 @@ const styles = StyleSheet.create({
   avatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.border, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
   avatarYou: { backgroundColor: COLORS.primary },
   avatarText: { color: COLORS.white, fontWeight: '700', fontSize: 12 },
-  playerName: { color: COLORS.text, fontWeight: '600' },
+  playerName: { color: COLORS.text, fontWeight: '600', marginBottom: 2 },
+  badgeSlot: { alignSelf: 'flex-start' },
   playerScore: { color: COLORS.textSecondary, fontSize: 16, fontWeight: '700' },
   playerScoreYou: { color: COLORS.primary },
   actions: { flexDirection: 'row', marginTop: 4 },

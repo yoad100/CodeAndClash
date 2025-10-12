@@ -13,6 +13,7 @@ import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
 import { LeaderboardEntry } from '../../types/user.types';
+import { LevelBadge } from '../../components/common/LevelBadge';
 
 export const RankingScreen: React.FC = observer(() => {
   const { userStore, uiStore } = rootStore;
@@ -75,6 +76,9 @@ export const RankingScreen: React.FC = observer(() => {
         )}
         
         <View style={styles.playerDetails}>
+          <View style={styles.badgeRow}>
+            <LevelBadge levelName={item.levelName} levelKey={item.levelKey} compact />
+          </View>
           <Text style={styles.username}>
             {item.username}
             {isCurrentUser && ' (You)'}
@@ -185,8 +189,9 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
-  myRankLeft: { alignItems: 'flex-start' },
-  myRankRight: { alignItems: 'flex-end' },
+  myRankLeft: { alignItems: 'flex-start', flex: 1 },
+  myBadgeColumn: { flex: 1, alignItems: 'center' },
+  myRankRight: { alignItems: 'flex-end', flex: 1 },
   myRankTitle: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 },
   myRankValue: { color: COLORS.text, fontSize: 24, fontWeight: '800' },
   unrankedHint: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
@@ -253,6 +258,10 @@ const styles = StyleSheet.create({
   stats: {
     fontSize: 12,
     color: COLORS.textSecondary,
+  },
+  badgeRow: {
+    marginBottom: 4,
+    alignSelf: 'flex-start',
   },
   rating: {
     fontSize: 20,

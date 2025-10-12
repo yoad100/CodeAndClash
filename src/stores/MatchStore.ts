@@ -216,8 +216,28 @@ export class MatchStore {
       this.currentMatch = {
         id: data.matchId,
         players: [
-          { id: data.player.id || '', username: data.player.username || 'You', score: 0, isFrozen: false },
-          { id: data.opponent.id || '', username: data.opponent.username, score: 0, isFrozen: false },
+          {
+            id: data.player.id || '',
+            username: data.player.username || 'You',
+            score: 0,
+            isFrozen: false,
+            avatar: data.player.avatar,
+            levelName: data.player.levelName,
+            levelKey: data.player.levelKey,
+            levelIndex: data.player.levelIndex,
+            rating: data.player.rating,
+          },
+          {
+            id: data.opponent.id || '',
+            username: data.opponent.username,
+            score: 0,
+            isFrozen: false,
+            avatar: data.opponent.avatar,
+            levelName: data.opponent.levelName,
+            levelKey: data.opponent.levelKey,
+            levelIndex: data.opponent.levelIndex,
+            rating: data.opponent.rating,
+          },
         ],
         questions: [],
         status: 'pending',
@@ -410,6 +430,10 @@ export class MatchStore {
           username: String(p.username || ''),
           score: typeof p.score === 'number' ? p.score : 0,
           isFrozen: !!p.isFrozen,
+          avatar: p.avatar,
+          levelName: p.levelName,
+          levelKey: p.levelKey,
+          levelIndex: typeof p.levelIndex === 'number' ? p.levelIndex : undefined,
         })) || this.currentMatch.players;
         this.currentMatch.players = normPlayers;
       }

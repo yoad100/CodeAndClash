@@ -2,8 +2,8 @@
 
 export interface MatchFoundPayload {
   matchId: string;
-  player: { id: string; username: string };
-  opponent: { id: string; username: string };
+  player: { id: string; username: string; avatar?: string; levelName?: string; levelKey?: string; levelIndex?: number; rating?: number };
+  opponent: { id: string; username: string; avatar?: string; levelName?: string; levelKey?: string; levelIndex?: number; rating?: number };
   subject?: string;
 }
 
@@ -36,5 +36,15 @@ export interface PlayerUnfrozenPayload {
 export interface MatchEndedPayload {
   matchId?: string;
   winnerId: string | null;
-  players: Array<{ id?: string; userId?: string; username: string; score?: number; isFrozen?: boolean }>;
+  players: Array<{
+    id?: string;
+    userId?: string;
+    username: string;
+    score?: number;
+    isFrozen?: boolean;
+    avatar?: string;
+    levelName?: string;
+    levelKey?: string;
+    levelIndex?: number;
+  }>;
 }

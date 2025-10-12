@@ -7,6 +7,9 @@ export interface User {
   avatar?: string;
   wins?: number;
   losses?: number;
+  levelName?: string;
+  levelKey?: string;
+  levelIndex?: number;
 }
 
 export interface LeaderboardEntry {
@@ -16,4 +19,7 @@ export interface LeaderboardEntry {
   rating: number;
   wins: number;
   losses: number;
+  levelName?: string;
+  levelKey?: string;
+  levelIndex?: number;
 }

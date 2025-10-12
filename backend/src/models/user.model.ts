@@ -9,6 +9,10 @@ const UserSchema = new Schema({
   wins: { type: Number, default: 0 },
   losses: { type: Number, default: 0 },
   avatar: { type: String },
+  levelName: { type: String, default: 'Intern' },
+  levelIndex: { type: Number, default: 12 },
+  levelKey: { type: String, default: 'intern' },
+  levelUpdatedAt: { type: Date },
   
   // Email verification fields
   isEmailVerified: { type: Boolean, default: false },

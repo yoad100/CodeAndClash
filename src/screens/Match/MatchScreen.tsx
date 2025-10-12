@@ -9,18 +9,22 @@ try {
 } catch (e) {
   Haptics = null;
 }
-import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
 import { socketService } from '../../services/socket.service';
 import { VsSplash } from '../../components/match/VsSplash';
 import { FreezeOverlayMobile } from '../../components/fx/FreezeOverlayMobile';
+import { MatchPlayer } from '../../types/match.types';
+import { LevelBadge } from '../../components/common/LevelBadge';
 
 const MatchScreenComponent: React.FC = () => {
   const { matchStore, uiStore, userStore } = rootStore;
   const navigation = useNavigation();
   const q = matchStore.currentQuestion;
+  const myPlayer = matchStore.myPlayer;
+  const opponentPlayer = matchStore.opponentPlayer;
   // Allow answering based solely on game state; offline answers will be queued by socketService
   const canAnswer = matchStore.canSubmitAnswer;
   const [pressedIndex, setPressedIndex] = React.useState<number | null>(null);
@@ -206,10 +210,35 @@ const MatchScreenComponent: React.FC = () => {
   const showFreezeOverlay = myFreezeCountdown > 0;
   const freezeDuration = matchStore.myFreezeTotalDuration ?? undefined;
   const freezePlayerName =
-    matchStore.myPlayer?.username ||
+    myPlayer?.username ||
     userStore?.user?.username ||
     matchStore.currentMatch?.players?.find((p) => p.id === matchStore.myUserId)?.username ||
     'You';
+
+  const renderPlayerIdentity = (player: MatchPlayer | null, fallback: string, isMe: boolean) => {
+    const username = (player?.username || fallback || '').trim() || fallback;
+    const avatarUri = player?.avatar || (isMe ? userStore?.user?.avatar : undefined);
+    const initial = username?.[0]?.toUpperCase?.() || fallback?.[0]?.toUpperCase?.() || '?';
+    const displayLevelName = player?.levelName || (isMe ? userStore?.user?.levelName : undefined) || (isMe && userStore?.user?.rank ? `Rank #${userStore.user.rank}` : undefined);
+
+    return (
+      <View style={styles.playerIdentity}>
+        {avatarUri ? (
+          <Image source={{ uri: avatarUri }} style={styles.playerAvatar} />
+        ) : (
+          <View style={[styles.playerAvatar, styles.playerAvatarFallback]}>
+            <Text style={styles.playerAvatarText}>{initial}</Text>
+          </View>
+        )}
+        <View style={styles.playerNameContainer}>
+          <Text style={styles.playerNameText} numberOfLines={1}>
+            {username}
+          </Text>
+          <LevelBadge levelName={displayLevelName} levelKey={player?.levelKey} compact />
+        </View>
+      </View>
+    );
+  };
 
   if (!matchStore.currentMatch) {
     return (
@@ -234,48 +263,65 @@ const MatchScreenComponent: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
       <View style={styles.header}>
-        <View style={styles.playerContainer}>
-          <View style={styles.playerInfo}>
-            <Text style={styles.playerLabel}>You</Text>
-            <Text style={styles.playerScore}>{matchStore.myPlayer?.score ?? 0}</Text>
-          </View>
-          {matchStore.myCombo >= 2 && (
-            <Animated.View style={[styles.comboBadge, { opacity: comboOpacity, transform: [{ scale: comboScale }] }]}
-              pointerEvents="none"
+        <View style={[styles.playerContainer, styles.playerContainerLeft]}>
+          {renderPlayerIdentity(myPlayer, userStore?.user?.username || 'You', true)}
+          <View style={styles.playerMeta}>
+            <View style={styles.scoreRow}>
+              <Text style={styles.playerScore}>{myPlayer?.score ?? 0}</Text>
+              {matchStore.myCombo >= 2 && (
+                <Animated.View
+                  style={[styles.comboBadge, { opacity: comboOpacity, transform: [{ scale: comboScale }] }]}
+                  pointerEvents="none"
+                >
+                  <Text style={styles.comboText}>COMBO x{matchStore.myCombo}</Text>
+                </Animated.View>
+              )}
+            </View>
+            <View
+              style={[
+                styles.statusIndicator,
+                matchStore.myPlayerStatus === 'can-answer' && styles.statusActive,
+                matchStore.myPlayerStatus === 'frozen' && styles.statusFrozen,
+                matchStore.myPlayerStatus === 'waiting' && styles.statusWaiting,
+              ]}
             >
-              <Text style={styles.comboText}>COMBO x{matchStore.myCombo}</Text>
-            </Animated.View>
-          )}
-          <View style={[
-            styles.statusIndicator, 
-            matchStore.myPlayerStatus === 'can-answer' && styles.statusActive,
-            matchStore.myPlayerStatus === 'frozen' && styles.statusFrozen,
-            matchStore.myPlayerStatus === 'waiting' && styles.statusWaiting
-          ]}>
-            <Text style={styles.statusText}>
-              {matchStore.myPlayerStatus === 'can-answer' ? '🎯' : 
-               matchStore.myPlayerStatus === 'frozen' ? '❄️' : 
-               matchStore.myPlayerStatus === 'waiting' ? '⏳' : '⭕'}
-            </Text>
+              <Text style={styles.statusText}>
+                {matchStore.myPlayerStatus === 'can-answer'
+                  ? '🎯'
+                  : matchStore.myPlayerStatus === 'frozen'
+                  ? '❄️'
+                  : matchStore.myPlayerStatus === 'waiting'
+                  ? '⏳'
+                  : '⭕'}
+              </Text>
+            </View>
           </View>
         </View>
-        
-        <View style={styles.playerContainer}>
-          <View style={styles.playerInfo}>
-            <Text style={styles.playerLabel}>Opponent</Text>
-            <Text style={styles.playerScore}>{matchStore.opponentPlayer?.score ?? 0}</Text>
-          </View>
-          <View style={[
-            styles.statusIndicator, 
-            matchStore.opponentPlayerStatus === 'can-answer' && styles.statusActive,
-            matchStore.opponentPlayerStatus === 'frozen' && styles.statusFrozen,
-            matchStore.opponentPlayerStatus === 'waiting' && styles.statusWaiting
-          ]}>
-            <Text style={styles.statusText}>
-              {matchStore.opponentPlayerStatus === 'can-answer' ? '🎯' : 
-               matchStore.opponentPlayerStatus === 'frozen' ? '❄️' : 
-               matchStore.opponentPlayerStatus === 'waiting' ? '⏳' : '⭕'}
-            </Text>
+
+        <View style={[styles.playerContainer, styles.playerContainerRight]}>
+          {renderPlayerIdentity(opponentPlayer, opponentPlayer?.username || 'Opponent', false)}
+          <View style={styles.playerMeta}>
+            <View style={styles.scoreRow}>
+              <Text style={styles.playerScore}>{opponentPlayer?.score ?? 0}</Text>
+            </View>
+            <View
+              style={[
+                styles.statusIndicator,
+                matchStore.opponentPlayerStatus === 'can-answer' && styles.statusActive,
+                matchStore.opponentPlayerStatus === 'frozen' && styles.statusFrozen,
+                matchStore.opponentPlayerStatus === 'waiting' && styles.statusWaiting,
+              ]}
+            >
+              <Text style={styles.statusText}>
+                {matchStore.opponentPlayerStatus === 'can-answer'
+                  ? '🎯'
+                  : matchStore.opponentPlayerStatus === 'frozen'
+                  ? '❄️'
+                  : matchStore.opponentPlayerStatus === 'waiting'
+                  ? '⏳'
+                  : '⭕'}
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -446,10 +492,18 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 80 },
   content: { padding: 20, alignItems: 'center', justifyContent: 'center', flex: 1 },
   title: { fontSize: 22, color: COLORS.text, fontWeight: 'bold' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, alignItems: 'center' },
-  playerContainer: { flexDirection: 'row', alignItems: 'center' },
-  playerInfo: { alignItems: 'center', marginRight: 8 },
-  playerLabel: { fontSize: 12, color: COLORS.textSecondary },
+  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, alignItems: 'flex-start' },
+  playerContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  playerContainerLeft: { marginRight: 12 },
+  playerContainerRight: { marginLeft: 12 },
+  playerIdentity: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
+  playerAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORS.border, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  playerAvatarFallback: { backgroundColor: COLORS.primary + '20' },
+  playerAvatarText: { color: COLORS.primary, fontWeight: '700', fontSize: 18 },
+  playerNameContainer: { flexShrink: 1 },
+  playerNameText: { fontSize: 14, color: COLORS.text, fontWeight: '700', marginBottom: 4 },
+  playerMeta: { alignItems: 'flex-end' },
+  scoreRow: { flexDirection: 'row', alignItems: 'center' },
   playerScore: { fontSize: 20, color: COLORS.text, fontWeight: '700' },
   statusIndicator: { 
     width: 32, 
