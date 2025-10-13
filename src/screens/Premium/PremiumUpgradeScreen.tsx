@@ -236,13 +236,13 @@ const styles = StyleSheet.create({
   currency: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: COLORS.primary,
+  color: COLORS.primaryText,
     marginTop: 4,
   },
   price: {
     fontSize: 48,
     fontWeight: 'bold',
-    color: COLORS.primary,
+  color: COLORS.primaryText,
   },
   period: {
     fontSize: 16,

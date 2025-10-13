@@ -144,6 +144,40 @@ class EmailService {
     }
   }
 
+  async sendPasswordResetEmail(email: string, username: string, token: string): Promise<void> {
+    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:8081'}/reset-password?token=${token}`;
+    const subject = '🔐 Reset your CodeAndClash password';
+    const html = this.getPasswordResetTemplate(username, resetUrl);
+    const text = `Hi ${username},\n\nTo reset your password, visit: ${resetUrl}\n\nThis link expires in 1 hour.`;
+
+    if (this.emailProvider === 'sendgrid') {
+      await this.sendWithSendGrid(email, subject, html, text);
+    } else if (this.emailProvider === 'smtp') {
+      await this.sendWithSMTP(email, subject, html, text);
+    } else {
+      console.log('\n📧 === PASSWORD RESET (DEVELOPMENT MODE) ===');
+      console.log(`To: ${email}`);
+      console.log(`Reset URL: ${resetUrl}`);
+      console.log('===========================================\n');
+    }
+  }
+
+  async sendPasswordChangedEmail(email: string, username: string): Promise<void> {
+    const subject = '✅ Your CodeAndClash password was changed';
+    const html = this.getPasswordChangedTemplate(username);
+    const text = `Hi ${username},\n\nThis is a confirmation that your password was changed. If you did not perform this action, please contact support.`;
+
+    if (this.emailProvider === 'sendgrid') {
+      await this.sendWithSendGrid(email, subject, html, text);
+    } else if (this.emailProvider === 'smtp') {
+      await this.sendWithSMTP(email, subject, html, text);
+    } else {
+      console.log('\n📧 === PASSWORD CHANGED (DEVELOPMENT MODE) ===');
+      console.log(`To: ${email}`);
+      console.log('===========================================\n');
+    }
+  }
+
   private async sendWithSendGrid(to: string, subject: string, html: string, text: string): Promise<void> {
     try {
       const msg = {
@@ -163,6 +197,42 @@ class EmailService {
       console.error('❌ Failed to send email via SendGrid:', error);
       throw new Error('Failed to send email via SendGrid');
     }
+  }
+
+  private getPasswordResetTemplate(username: string, resetUrl: string): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+      <body style="font-family: Arial, sans-serif; color:#333; max-width:600px; margin:0 auto; padding:20px;">
+        <div style="text-align:center;margin-bottom:20px;"><h1 style="color:#4f46e5; margin:0;">⚔️ CodeAndClash</h1></div>
+        <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #eee;">
+          <h2 style="color:#111;">Hi ${username},</h2>
+          <p>You requested to reset your password. Click the button below to choose a new password. This link will expire in 1 hour.</p>
+          <div style="text-align:center; margin:20px 0;"><a href="${resetUrl}" style="background:#4f46e5;color:white;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password</a></div>
+          <p>If you didn't request this, you can safely ignore this email.</p>
+          <p style="word-break:break-all; background:#f3f4f6; padding:8px; border-radius:4px;">${resetUrl}</p>
+        </div>
+      </body>
+      </html>
+    `;
+  }
+
+  private getPasswordChangedTemplate(username: string): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+      <body style="font-family: Arial, sans-serif; color:#333; max-width:600px; margin:0 auto; padding:20px;">
+        <div style="text-align:center;margin-bottom:20px;"><h1 style="color:#4f46e5; margin:0;">⚔️ CodeAndClash</h1></div>
+        <div style="background:#fff; padding:20px; border-radius:8px; border:1px solid #eee;">
+          <h2 style="color:#111;">Hi ${username},</h2>
+          <p>Your password was recently changed. If this was you, no further action is required.</p>
+          <p>If you did not change your password, please contact support immediately.</p>
+        </div>
+      </body>
+      </html>
+    `;
   }
 
   private async sendWithSMTP(to: string, subject: string, html: string, text: string): Promise<void> {

@@ -5,6 +5,9 @@
     ],
     "experiments": {
       "reactNativeFabric": false
+    },
+    "android": {
+      "package": "com.anonymous.codeandclash"
     }
   }
 }

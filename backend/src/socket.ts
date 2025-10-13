@@ -300,11 +300,12 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
     }
   }
 
+  const ratingChanges: Array<{ userId: string; oldRating: number; newRating: number }> = [];
   for (const p of match.players as any[]) {
     const playerId = String(p.userId);
     const doc = userMap.get(playerId);
     if (!doc) continue;
-
+    const oldRating = typeof doc.rating === 'number' ? doc.rating : 1000;
     if (winnerId && String(playerId) === String(winnerId)) {
       doc.wins = (doc.wins || 0) + 1;
       if (ratingDelta > 0) {
@@ -320,6 +321,9 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
       doc.losses = doc.losses || 0;
       doc.wins = doc.wins || 0;
     }
+
+    const newRating = typeof doc.rating === 'number' ? doc.rating : oldRating;
+    ratingChanges.push({ userId: playerId, oldRating, newRating });
 
     const { level } = await syncUserLevel(doc, { persist: false });
     await doc.save();

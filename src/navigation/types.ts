@@ -1,6 +1,8 @@
 export type RootStackParamList = {
   Auth: undefined;
   EmailVerification: { email: string; fromRegistration?: boolean };
+  ForgotPassword: undefined;
+  ResetPassword: { token?: string } | undefined;
   Main: undefined;
   MatchLobby: undefined;
   Match: undefined;

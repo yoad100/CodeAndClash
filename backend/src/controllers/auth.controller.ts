@@ -81,8 +81,8 @@ export const register = async (req: Request, res: Response) => {
       user.emailVerificationExpires = undefined;
       await user.save();
 
-      const accessToken = (jwt.sign as any)({ sub: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-      const refreshToken = (jwt.sign as any)({ sub: user.id }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
+      const accessToken = (jwt.sign as any)({ sub: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      const refreshToken = (jwt.sign as any)({ sub: user.id, username: user.username }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
 
       await RefreshToken.create({ userId: user._id, token: refreshToken, expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000) });
 
@@ -140,16 +140,35 @@ export const login = async (req: Request, res: Response) => {
     const higherRanked = await User.countDocuments({ rating: { $gt: user.rating } });
     const computedLevel = getLevelByRank(higherRanked + 1, totalPlayers, breakpoints);
 
+    console.log('🔐 Login level computation:', {
+      username: user.username,
+      rating: user.rating,
+      higherRanked,
+      totalPlayers,
+      computedLevel: { name: computedLevel.name, key: computedLevel.key, index: computedLevel.index },
+      userBefore: { levelName: user.levelName, levelKey: user.levelKey, levelIndex: user.levelIndex },
+    });
+
     if (user.levelKey !== computedLevel.key || user.levelIndex !== computedLevel.index) {
       user.levelName = computedLevel.name;
       user.levelKey = computedLevel.key;
       user.levelIndex = computedLevel.index;
       user.levelUpdatedAt = new Date();
       await user.save();
+      console.log('✅ User level updated and saved');
+    } else {
+      console.log('ℹ️ User level already up to date');
     }
 
-    const accessToken = (jwt.sign as any)({ sub: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    const refreshToken = (jwt.sign as any)({ sub: user.id }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
+    console.log('📤 Sending login response with user:', {
+      username: user.username,
+      levelName: user.levelName,
+      levelKey: user.levelKey,
+      levelIndex: user.levelIndex,
+    });
+
+    const accessToken = (jwt.sign as any)({ sub: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const refreshToken = (jwt.sign as any)({ sub: user.id, username: user.username }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
 
     await RefreshToken.create({ userId: user._id, token: refreshToken, expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000) });
 
@@ -186,8 +205,8 @@ export const refresh = async (req: Request, res: Response) => {
     const stored = await RefreshToken.findOne({ userId: payload.sub, token: refreshToken });
     if (!stored) return res.status(401).json({ message: 'Invalid token' });
 
-  const accessToken = (jwt.sign as any)({ sub: payload.sub }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-  const newRefresh = (jwt.sign as any)({ sub: payload.sub }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
+  const accessToken = (jwt.sign as any)({ sub: payload.sub, username: payload.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const newRefresh = (jwt.sign as any)({ sub: payload.sub, username: payload.username }, JWT_SECRET, { expiresIn: REFRESH_EXPIRES });
 
     stored.token = newRefresh;
     stored.expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000);
@@ -320,5 +339,74 @@ export const resendVerification = async (req: Request, res: Response) => {
       message: 'Internal server error',
       error: 'server_error'
     });
+  }
+};
+
+export const requestPasswordReset = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+
+    const user = await User.findOne({ email });
+    // Always return success for security (don't reveal whether email exists)
+    if (!user) {
+      return res.json({ message: 'If an account with this email exists, a reset link has been sent.' });
+    }
+
+    // Generate reset token
+    const resetToken = emailService.generateVerificationToken();
+    const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    user.passwordResetToken = resetToken;
+    user.passwordResetExpires = resetExpires;
+    await user.save();
+
+    // Send reset email (best-effort)
+    try {
+      await emailService.sendPasswordResetEmail(user.email, user.username, resetToken);
+    } catch (err) {
+      console.error('Failed to send password reset email:', err);
+      // don't fail - still return generic success message
+    }
+
+    return res.json({ message: 'If an account with this email exists, a reset link has been sent.' });
+  } catch (err) {
+    console.error('Password reset request error:', err);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token } = req.query;
+    const { password } = req.body;
+
+    if (!token || typeof token !== 'string') return res.status(400).json({ message: 'Missing token' });
+    if (!password || typeof password !== 'string' || password.length < 6) return res.status(400).json({ message: 'Invalid password' });
+
+    const user = await User.findOne({ passwordResetToken: token, passwordResetExpires: { $gt: new Date() } });
+    if (!user) return res.status(400).json({ message: 'Invalid or expired token' });
+
+    // Update password
+    const hash = await bcrypt.hash(password, 10);
+    user.passwordHash = hash;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    // Invalidate refresh tokens for this user
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    // Optionally send a confirmation email
+    try {
+      await emailService.sendPasswordChangedEmail(user.email, user.username);
+    } catch (err) {
+      console.error('Failed to send password changed email:', err);
+    }
+
+    return res.json({ message: 'Password has been reset successfully' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    return res.status(500).json({ message: 'Internal server error' });
   }
 };

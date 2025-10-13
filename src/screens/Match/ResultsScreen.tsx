@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   card: { width: '88%', maxWidth: 520, backgroundColor: COLORS.cardBackground, borderRadius: 16, paddingVertical: 20, paddingHorizontal: 16, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border },
   emoji: { fontSize: 48, marginBottom: 4 },
   title: { fontSize: 22, color: COLORS.text, fontWeight: 'bold', marginBottom: 4 },
-  winner: { fontSize: 18, color: COLORS.primary, marginBottom: 12 },
+  winner: { fontSize: 18, color: COLORS.primaryText, marginBottom: 12 },
   scores: { width: '100%', marginTop: 4, marginBottom: 16 },
   scoreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: COLORS.background, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: COLORS.border },
   playerLeft: { flexDirection: 'row', alignItems: 'center' },
@@ -146,6 +146,6 @@ const styles = StyleSheet.create({
   playerName: { color: COLORS.text, fontWeight: '600', marginBottom: 2 },
   badgeSlot: { alignSelf: 'flex-start' },
   playerScore: { color: COLORS.textSecondary, fontSize: 16, fontWeight: '700' },
-  playerScoreYou: { color: COLORS.primary },
+  playerScoreYou: { color: COLORS.primaryText },
   actions: { flexDirection: 'row', marginTop: 4 },
 });

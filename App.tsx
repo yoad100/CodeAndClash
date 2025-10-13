@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StatusBar, View, StyleSheet } from 'react-native';
+import { StatusBar, View, StyleSheet, Image, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { observer } from 'mobx-react-lite';
 import { configure } from 'mobx';
@@ -38,6 +38,7 @@ const ToastHost: React.FC = observer(() => {
 
 const App: React.FC = () => {
   const [isInitialized, setIsInitialized] = useState(false);
+  const [logoReady, setLogoReady] = useState(false);
   const { uiStore } = rootStore;
 
   useEffect(() => {
@@ -77,6 +78,27 @@ const App: React.FC = () => {
 
   if (!isInitialized) {
     return <LoadingSpinner message="Loading Coding War..." />;
+  }
+
+  // Only wait for the native asset to decode on native platforms (avoid hanging on web)
+  const shouldWaitForLogo = Platform.OS !== 'web';
+  if (shouldWaitForLogo && !logoReady) {
+    return (
+      <SafeAreaProvider>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.container}>
+          <LoadingSpinner message="Loading..." />
+          {/* Hidden Image to trigger asset decoding; onLoad will flip logoReady (native only) */}
+          {Platform.OS !== 'web' && (
+            <Image
+              source={require('./assets/Code&ClashLogo.png')}
+              onLoad={() => setLogoReady(true)}
+              style={{ width: 0, height: 0 }}
+            />
+          )}
+        </View>
+      </SafeAreaProvider>
+    );
   }
 
   return (

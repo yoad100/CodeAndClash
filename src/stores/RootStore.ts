@@ -26,6 +26,7 @@ export class RootStore {
   async initialize(): Promise<void> {
     await this.authStore.checkAuthStatus();
     if (this.authStore.isAuthenticated) {
+      await this.userStore.hydrateFromStorage();
       await this.userStore.fetchUserProfile();
       // wire myPlayerId into matchStore for score/identity handling
       if (this.userStore.user && this.userStore.user.id) {

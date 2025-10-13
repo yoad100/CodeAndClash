@@ -21,6 +21,8 @@ import { rootStore } from '../../stores/RootStore';
 import { RootStackParamList } from '../../navigation/types';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/common/Button';
+import SubjectCard from '../../components/analytics/SubjectCard';
+import { apiService } from '../../services/api.service';
 
 type PremiumNavigationProp = StackNavigationProp<RootStackParamList>;
 
@@ -34,6 +36,30 @@ export const PremiumScreen: React.FC = observer(() => {
 
   const outgoingInvite = matchStore.outgoingInvite;
   const subjectOptions = React.useMemo(() => [{ id: 'any', name: 'Any Subject', icon: '🎲' }, ...SUBJECTS], []);
+
+  // Analytics state
+  const [analytics, setAnalytics] = React.useState<Array<{ subject: string; correct: number; incorrect: number; total: number }>>([]);
+  const [loadingAnalytics, setLoadingAnalytics] = React.useState(false);
+
+  // Fetch analytics when screen mounts (only for premium users)
+  React.useEffect(() => {
+    let mounted = true;
+    async function load() {
+      if (!userStore.isPremium) return;
+      setLoadingAnalytics(true);
+      try {
+        const resp = await apiService.getMySubjectAnalytics();
+        if (!mounted) return;
+        setAnalytics(resp.data || []);
+      } catch (err) {
+        console.warn('Failed to load analytics', err);
+      } finally {
+        if (mounted) setLoadingAnalytics(false);
+      }
+    }
+    load();
+    return () => { mounted = false; };
+  }, [userStore.isPremium]);
 
   const inviteStatusCopy = React.useMemo(() => {
     if (!outgoingInvite) return null;
@@ -87,6 +113,8 @@ export const PremiumScreen: React.FC = observer(() => {
           </Text>
         </View>
 
+        {/* (analytics moved below) */}
+
         <View style={styles.privateMatchSection}>
           <Text style={styles.sectionTitle}>Private Match</Text>
           <Text style={styles.sectionSubtitle}>
@@ -133,6 +161,43 @@ export const PremiumScreen: React.FC = observer(() => {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* Analytics dashboard: boxed card below the subjects grid */}
+        {userStore.isPremium && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Your Subject Stats</Text>
+            {loadingAnalytics ? (
+              <Text style={styles.sectionSubtitle}>Loading…</Text>
+            ) : analytics.length === 0 ? (
+              <Text style={styles.sectionSubtitle}>No data yet — play some matches to gather stats.</Text>
+            ) : (
+              <>
+                {/* chart removed - per request use small circle charts in each SubjectCard */}
+                <View>
+                  {(() => {
+                    const knownMap = new Map(SUBJECTS.map(s => [String(s.id).toLowerCase(), s.name]));
+                    const grouped: Record<string, { correct: number; incorrect: number; rawNames: Set<string> }> = {};
+                    for (const row of analytics) {
+                      const raw = String(row.subject || 'any');
+                      const keyLower = raw.toLowerCase();
+                      const mapped = knownMap.get(keyLower);
+                      const groupKey = mapped ? mapped : 'Other';
+                      if (!grouped[groupKey]) grouped[groupKey] = { correct: 0, incorrect: 0, rawNames: new Set() };
+                      grouped[groupKey].correct += row.correct;
+                      grouped[groupKey].incorrect += row.incorrect;
+                      if (!mapped) grouped[groupKey].rawNames.add(raw);
+                    }
+                    return Object.entries(grouped).map(([groupName, vals]) => {
+                      const rawList = Array.from(vals.rawNames).slice(0, 3).join(', ');
+                      const subtitle = groupName === 'Other' && rawList ? `Seen as: ${rawList}` : undefined;
+                      return <SubjectCard key={groupName} subjectName={groupName} subtitle={subtitle} correct={vals.correct} incorrect={vals.incorrect} />;
+                    });
+                  })()}
+                </View>
+              </>
+            )}
+          </View>
+        )}
       </ScrollView>
 
       <Modal
@@ -238,9 +303,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    marginTop: (0-50),
   },
   scrollContent: {
-    padding: 20,
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   lockedContainer: {
     flex: 1,
@@ -270,7 +338,7 @@ const styles = StyleSheet.create({
     minWidth: 250,
   },
   header: {
-    marginBottom: 32,
+    marginBottom: 12,
   },
   title: {
     fontSize: 32,
@@ -286,10 +354,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginBottom: 32,
+    marginBottom: 12,
+    justifyContent: 'center',
   },
   subjectCard: {
-    width: '48%',
+    width: '47%',
     aspectRatio: 1,
     backgroundColor: COLORS.cardBackground,
     borderRadius: 16,
@@ -297,8 +366,9 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    padding: 30,
     position: 'relative',
+    marginHorizontal: '0.5%',
   },
   subjectIcon: {
     fontSize: 48,
@@ -481,4 +551,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.white,
   },
+  // Analytics card styles
+  analyticsCard: {
+    marginTop: 0,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    // make it roughly square on small screens while responsive
+    minHeight: 140,
+    alignSelf: 'stretch',
+  },
+  sectionCard: {
+    marginTop: 8,
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  // chartBox removed
 });

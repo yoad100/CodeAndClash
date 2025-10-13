@@ -216,10 +216,15 @@ const MatchScreenComponent: React.FC = () => {
     'You';
 
   const renderPlayerIdentity = (player: MatchPlayer | null, fallback: string, isMe: boolean) => {
-    const username = (player?.username || fallback || '').trim() || fallback;
+    // Use userStore username if player username is 'Guest' and it's the current user
+    let username = player?.username || fallback;
+    if (isMe && username === 'Guest' && userStore?.user?.username) {
+      username = userStore.user.username;
+    }
+    
     const avatarUri = player?.avatar || (isMe ? userStore?.user?.avatar : undefined);
-    const initial = username?.[0]?.toUpperCase?.() || fallback?.[0]?.toUpperCase?.() || '?';
-    const displayLevelName = player?.levelName || (isMe ? userStore?.user?.levelName : undefined) || (isMe && userStore?.user?.rank ? `Rank #${userStore.user.rank}` : undefined);
+    const initial = username?.[0]?.toUpperCase?.() || 'U';
+    const displayLevelName = player?.levelName || (isMe ? userStore?.user?.levelName : undefined);
 
     return (
       <View style={styles.playerIdentity}>
@@ -234,7 +239,9 @@ const MatchScreenComponent: React.FC = () => {
           <Text style={styles.playerNameText} numberOfLines={1}>
             {username}
           </Text>
-          <LevelBadge levelName={displayLevelName} levelKey={player?.levelKey} compact />
+          {displayLevelName && (
+            <LevelBadge levelName={displayLevelName} levelKey={player?.levelKey} compact />
+          )}
         </View>
       </View>
     );
@@ -492,32 +499,101 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 80 },
   content: { padding: 20, alignItems: 'center', justifyContent: 'center', flex: 1 },
   title: { fontSize: 22, color: COLORS.text, fontWeight: 'bold' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, alignItems: 'flex-start' },
-  playerContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  playerContainerLeft: { marginRight: 12 },
-  playerContainerRight: { marginLeft: 12 },
-  playerIdentity: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
-  playerAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: COLORS.border, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  playerAvatarFallback: { backgroundColor: COLORS.primary + '20' },
-  playerAvatarText: { color: COLORS.primary, fontWeight: '700', fontSize: 18 },
-  playerNameContainer: { flexShrink: 1 },
-  playerNameText: { fontSize: 14, color: COLORS.text, fontWeight: '700', marginBottom: 4 },
-  playerMeta: { alignItems: 'flex-end' },
-  scoreRow: { flexDirection: 'row', alignItems: 'center' },
-  playerScore: { fontSize: 20, color: COLORS.text, fontWeight: '700' },
+  header: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 12, 
+    paddingVertical: 10,
+    paddingBottom: 8, 
+    alignItems: 'center',
+    backgroundColor: COLORS.cardBackground + '80',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  playerContainer: { 
+    flex: 1, 
+    flexDirection: 'column', 
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  playerContainerLeft: { marginRight: 8 },
+  playerContainerRight: { marginLeft: 8, alignItems: 'flex-end' },
+  playerIdentity: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    maxWidth: '100%',
+  },
+  playerAvatar: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    backgroundColor: COLORS.border, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginRight: 8,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+  },
+  playerAvatarFallback: { 
+    backgroundColor: COLORS.primary + '15', 
+    borderColor: COLORS.primary + '50' 
+  },
+  playerAvatarText: { color: COLORS.primaryText, fontWeight: '700', fontSize: 16 },
+  playerNameContainer: { 
+    flexShrink: 1, 
+    flexDirection: 'column',
+    gap: 3,
+    // Ensure username and level badge label render above animated badge flames
+    zIndex: 50,
+    elevation: 50,
+  },
+  playerNameText: { 
+    fontSize: 13, 
+    color: COLORS.text, 
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    // Keep the username visually on top of animated badge
+    zIndex: 60,
+    elevation: 60,
+  },
+  playerMeta: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    gap: 8,
+  },
+  scoreRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+  },
+  playerScore: { 
+    fontSize: 20, 
+    color: COLORS.text, 
+    fontWeight: '800',
+    minWidth: 32,
+    textAlign: 'center',
+  },
   statusIndicator: { 
     width: 32, 
     height: 32, 
     borderRadius: 16, 
-    backgroundColor: COLORS.border, 
+    backgroundColor: COLORS.cardBackground, 
     alignItems: 'center', 
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent'
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
   },
-  statusActive: { backgroundColor: COLORS.success, borderColor: COLORS.glowCyan },
-  statusFrozen: { backgroundColor: COLORS.error, borderColor: COLORS.glowPink },
-  statusWaiting: { backgroundColor: COLORS.warning, borderColor: COLORS.glowPrimary },
+  statusActive: { 
+    backgroundColor: COLORS.success + '20', 
+    borderColor: COLORS.success,
+  },
+  statusFrozen: { 
+    backgroundColor: COLORS.error + '20', 
+    borderColor: COLORS.error,
+  },
+  statusWaiting: { 
+    backgroundColor: COLORS.warning + '20', 
+    borderColor: COLORS.warning,
+  },
   statusText: { fontSize: 16 },
   
   turnBanner: {
@@ -684,20 +760,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   comboBadge: {
-    marginLeft: 8,
+    marginLeft: 6,
     backgroundColor: COLORS.primary,
     borderColor: COLORS.glowPrimary,
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
   comboText: {
     color: COLORS.white,
     fontWeight: '800',
-    fontSize: 12,
+    fontSize: 10,
     textShadowColor: COLORS.glowCyan,
-    textShadowRadius: 6,
+    textShadowRadius: 4,
     textShadowOffset: { width: 0, height: 0 },
     letterSpacing: 1,
   },

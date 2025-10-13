@@ -257,6 +257,20 @@ export class MatchStore {
       this.searchSubject = data.subject || null;
     });
 
+    try {
+      const userStore = this.rootStore?.userStore;
+      if (userStore && data.player) {
+        userStore.updateUser({
+          levelName: data.player.levelName,
+          levelKey: data.player.levelKey,
+          levelIndex: data.player.levelIndex,
+          rating: data.player.rating,
+        });
+      }
+    } catch (error) {
+      console.warn('MatchStore.handleMatchFound failed to sync user level', error);
+    }
+
     this.navigateToMatchLobbyWithRetry();
   }
 
@@ -438,6 +452,30 @@ export class MatchStore {
         this.currentMatch.players = normPlayers;
       }
     });
+
+    try {
+      const userStore = this.rootStore?.userStore;
+      if (userStore) {
+        const authId = this.myUserId || this.rootStore?.authStore?.currentUser?.id || null;
+        const matchPlayer = (result as any).players?.find((p: any) => String(p.id ?? p.userId ?? '') === String(authId));
+        if (matchPlayer) {
+          userStore.updateUser({
+            levelName: matchPlayer.levelName,
+            levelKey: matchPlayer.levelKey,
+            levelIndex: typeof matchPlayer.levelIndex === 'number' ? matchPlayer.levelIndex : undefined,
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('MatchStore.handleMatchEnded failed to sync user level', error);
+    }
+
+    // Refresh authoritative profile in background to capture rating and tier changes
+    try {
+      void this.rootStore?.userStore?.fetchUserProfile();
+    } catch (error) {
+      console.warn('MatchStore.handleMatchEnded profile refresh failed', error);
+    }
 
     // Navigate to Results screen for a proper end-of-match UX
     this.navigateToResultsWithRetry();

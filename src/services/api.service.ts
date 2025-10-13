@@ -100,12 +100,27 @@ class ApiService {
     return this.client.get(`/auth/verify-email?token=${token}`);
   }
 
+  async requestPasswordReset(email: string) {
+    return this.client.post('/auth/request-password-reset', { email });
+  }
+
+  async resetPassword(token: string, password: string) {
+    return this.client.post(`/auth/reset-password?token=${encodeURIComponent(token)}`, { password });
+  }
+
   async getUserProfile() {
     return this.client.get('/users/me');
   }
 
   async getTopPlayers() {
     return this.client.get('/leaderboard/top?limit=100');
+  }
+  async getTopPlayersPeriod(period: 'all' | 'week' | 'month' = 'all') {
+    return this.client.get(`/leaderboard/top?limit=100&period=${period}`);
+  }
+
+  async getMySubjectAnalytics() {
+    return this.client.get('/users/me/analytics/subjects');
   }
 }
 

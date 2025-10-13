@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   TextInput,
   Text,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   TextInputProps,
 } from 'react-native';
 import { COLORS } from '../../constants/colors';
@@ -25,19 +25,23 @@ export const Input: React.FC<InputProps> = ({
   ...props
 }) => {
   const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<TextInput | null>(null);
 
   return (
     <View style={styles.container}>
       {label && <Text style={styles.label}>{label}</Text>}
-      <View
-        style={[
+      <Pressable
+        onPress={() => inputRef.current && inputRef.current.focus()}
+        style={({ pressed }) => [
           styles.inputContainer,
           isFocused ? styles.inputContainerFocused : undefined,
           error ? styles.inputContainerError : undefined,
+          pressed ? { opacity: 0.95 } : undefined,
         ]}
       >
         {icon && <View style={styles.iconLeft}>{icon}</View>}
         <TextInput
+          ref={inputRef}
           style={[styles.input, style]}
           placeholderTextColor={COLORS.textSecondary}
           onFocus={() => setIsFocused(true)}
@@ -45,7 +49,7 @@ export const Input: React.FC<InputProps> = ({
           {...props}
         />
         {rightIcon && <View style={styles.iconRight}>{rightIcon}</View>}
-      </View>
+      </Pressable>
       {error && <Text style={styles.error}>{error}</Text>}
     </View>
   );

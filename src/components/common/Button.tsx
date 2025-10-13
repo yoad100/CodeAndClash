@@ -122,6 +122,6 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
   outlineText: {
-    color: COLORS.primary,
+  color: COLORS.primaryText,
   },
 });

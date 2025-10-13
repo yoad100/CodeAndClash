@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator, type BottomTabHeaderProps } from '@react-navigation/bottom-tabs';
@@ -14,6 +15,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 // Screens
 import { AuthScreen } from '../screens/Auth/AuthScreen';
 import { EmailVerificationScreen } from '../screens/Auth/EmailVerificationScreen';
+import { ForgotPasswordScreen } from '../screens/Auth/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '../screens/Auth/ResetPasswordScreen';
 import { HomeScreen } from '../screens/Home/HomeScreen';
 import { PremiumScreen } from '../screens/Premium/PremiumScreen';
 import { PremiumUpgradeScreen } from '../screens/Premium/PremiumUpgradeScreen';
@@ -26,6 +29,7 @@ import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { useNavigation } from '@react-navigation/native';
 import { IncomingInviteDialog } from '../components/match/IncomingInviteDialog';
 import { LevelBadge } from '../components/common/LevelBadge';
+import { buildLevelBreakpoints, getLevelByRank } from '../constants/levels';
 
 // Types
 import { RootStackParamList, MainTabParamList } from './types';
@@ -47,6 +51,20 @@ const HomeStackNavigator: React.FC = () => {
 
 const MainTabs: React.FC = observer(() => {
   const { userStore, matchStore, authStore, uiStore } = rootStore as any;
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        // If leaderboard is empty, fetch it so header can compute level cutoffs
+        if (mounted && Array.isArray(userStore?.leaderboard) && userStore.leaderboard.length === 0 && !userStore.isLoading) {
+          await userStore.fetchLeaderboard();
+        }
+      } catch (err) {
+        if (process?.env?.NODE_ENV === 'development') console.warn('Failed to fetch leaderboard on mount:', err);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [userStore]);
   const [pendingTab, setPendingTab] = React.useState<string | null>(null);
   const [confirmVisible, setConfirmVisible] = React.useState(false);
   const nav = useNavigation<any>();
@@ -117,7 +135,7 @@ const MainTabs: React.FC = observer(() => {
     return (
       <LinearGradient
         colors={['#0f172a', '#161538', '#1f0e3b']}
-        style={[headerStyles.gradient, { paddingTop: insets.top + 14 }]}
+        style={[headerStyles.gradient, { paddingTop: insets.top + 8 }]}
       >
         {isInActiveMatch && (
           <View style={[headerStyles.liveBadge, headerStyles.liveBadgeStandalone]}>
@@ -145,18 +163,44 @@ const MainTabs: React.FC = observer(() => {
               <LevelBadge levelName={user?.levelName} levelKey={user?.levelKey} compact />
             </View>
             <View style={headerStyles.pillRow}>
-              <View style={[headerStyles.statusPill, { borderColor: status.color, backgroundColor: `${status.color}22` }]}>
-                <Ionicons
-                  name={status.icon as any}
-                  size={13}
-                  color={status.color}
-                  style={headerStyles.pillIcon}
-                />
-                <Text style={[headerStyles.pillText, { color: status.color }]}>{status.text}</Text>
-              </View>
-              <View style={headerStyles.statPill}>
-                <Ionicons name="sparkles" size={13} color={COLORS.warning} style={headerStyles.pillIcon} />
-                <Text style={[headerStyles.pillText, { color: COLORS.white }]}>{user?.rating ?? '—'}</Text>
+              <View style={headerStyles.ratingContainer}>
+                {(() => {
+                  const rating = typeof user?.rating === 'number' ? user.rating : NaN;
+                  const store = (rootStore as any).userStore;
+                  const isMax = !!store?.isMaxLevel;
+                  const next = typeof store?.nextRating === 'number' ? store.nextRating : undefined;
+                  const progress = typeof store?.progressToNextLevel === 'number' ? store.progressToNextLevel : undefined;
+                  const displayCurrent = Number.isFinite(rating) ? rating : '—';
+
+                  // If user is at max level, show full bar with 'Max Level'
+                  if (isMax) {
+                    return (
+                      <View style={headerStyles.ratingInner}>
+                        <View style={headerStyles.ratingBarBackground}>
+                          <View style={[headerStyles.ratingBarFill, { width: `100%`, backgroundColor: COLORS.warning || COLORS.secondary }]} />
+                        </View>
+                        <Text style={headerStyles.ratingText}>{`MAX LEVEL`}</Text>
+                      </View>
+                    );
+                  }
+
+                  // Normal rendering: use progress and next if available, otherwise fall back to buckets
+                  const finalNext = typeof next === 'number' && Number.isFinite(next)
+                    ? next
+                    : Math.ceil((Number.isFinite(rating) ? rating : 0) / 2000) * 2000 || 2000;
+                  const finalProgress = typeof progress === 'number' && Number.isFinite(progress)
+                    ? progress
+                    : (Number.isFinite(rating) ? Math.max(0, Math.min(1, rating / finalNext)) : 0);
+
+                  return (
+                    <View style={headerStyles.ratingInner}>
+                      <View style={headerStyles.ratingBarBackground}>
+                        <View style={[headerStyles.ratingBarFill, { width: `${finalProgress * 100}%`, backgroundColor: COLORS.secondary }]} />
+                      </View>
+                      <Text style={headerStyles.ratingText}>{`${displayCurrent} / ${finalNext}`}</Text>
+                    </View>
+                  );
+                })()}
               </View>
             </View>
           </View>
@@ -312,7 +356,27 @@ export const AppNavigator: React.FC = observer(() => {
   const disconnectSocket = () => { socketService.disconnect(); };
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        // Handle simple web deep-link for reset-password token (e.g. /reset-password?token=...)
+        try {
+          if (Platform.OS === 'web') {
+            const loc = (globalThis as any).location;
+            if (loc && loc.pathname && loc.pathname.startsWith('/reset-password')) {
+              const q = new URLSearchParams(loc.search || '');
+              const t = q.get('token');
+              if (t && !authStore?.isAuthenticated) {
+                // Navigate to ResetPassword with token
+                navigationRef.current && (navigationRef.current as any).navigate('ResetPassword', { token: t });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Deep link handling failed', e);
+        }
+      }}
+    >
       <Stack.Navigator
         screenOptions={{
           headerStyle: {
@@ -344,6 +408,16 @@ export const AppNavigator: React.FC = observer(() => {
                 gestureEnabled: false, // Prevent going back with swipe
               }}
             />
+            <Stack.Screen
+              name="ForgotPassword"
+              component={ForgotPasswordScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="ResetPassword"
+              component={ResetPasswordScreen}
+              options={{ headerShown: false }}
+            />
           </>
         ) : (
           <>
@@ -370,14 +444,38 @@ export const AppNavigator: React.FC = observer(() => {
 const headerStyles = StyleSheet.create({
   gradient: {
     paddingHorizontal: 18,
-    paddingBottom: 14,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(148, 163, 184, 0.12)',
     shadowColor: '#0ea5e9',
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  ratingContainer: {
+    marginLeft: 8,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  ratingInner: {
+    width: 140,
+  },
+  ratingBarBackground: {
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  ratingBarFill: {
+    height: 8,
+    borderRadius: 6,
+  },
+  ratingText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   liveBadge: {
     flexDirection: 'row',
@@ -436,8 +534,8 @@ const headerStyles = StyleSheet.create({
   usernameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
+    gap: 6,
+    marginBottom: 2,
   },
   pillRow: {
     flexDirection: 'row',

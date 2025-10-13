@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image as RNImage, ScrollView, Animated, Easing, Dimensions } from 'react-native';
+import { SmartImage } from '../../components/common/SmartImage';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { observer } from 'mobx-react-lite';
-import { Button } from '../../components/common/Button';
 import { ArcadeButton } from '../../components/fx/ArcadeButton';
 import { COLORS } from '../../constants/colors';
 import { rootStore } from '../../stores/RootStore';
@@ -52,6 +53,11 @@ export const HomeScreen: React.FC = observer(() => {
         alwaysBounceVertical
         showsVerticalScrollIndicator={false}
       >
+        <SmartImage
+          primary={() => require('../../../assets/Code&ClashLogo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.title}>Enter the Arena</Text>
         <Text style={styles.subtitle}>Challenge a rival and claim glory!</Text>
 
@@ -69,19 +75,32 @@ export const HomeScreen: React.FC = observer(() => {
         )}
 
         <View style={styles.quickRow}>
-          <TouchableOpacity style={styles.quickCard} onPress={() => navigation.navigate('Premium' as any)} accessibilityRole="button" accessibilityLabel="Go to Premium">
-            <Text style={styles.quickTitle}>Premium</Text>
-            <Text style={styles.quickSubtitle}>Upgrade</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickCard} onPress={() => navigation.navigate('Ranking' as any)} accessibilityRole="button" accessibilityLabel="Go to Leaderboard">
-            <Text style={styles.quickTitle}>Leaderboard</Text>
-            <Text style={styles.quickSubtitle}>Top Players</Text>
-          </TouchableOpacity>
+          <AnimatedTouchableCard title="Premium" subtitle="Upgrade and perks" icon={<Ionicons name="diamond" size={20} color={COLORS.primary} />} onPress={() => navigation.navigate('Premium' as any)} />
+            <AnimatedTouchableCard title="Leaderboard" subtitle="Top players & stats" icon={<Ionicons name="trophy" size={20} color={COLORS.primary} />} onPress={() => navigation.navigate('Ranking' as any)} />
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 });
+
+const AnimatedTouchableCard: React.FC<{ title: string; subtitle: string; icon?: React.ReactNode; onPress: () => void }> = ({ title, subtitle, icon, onPress }) => {
+  const scale = React.useRef(new Animated.Value(1)).current;
+  const onPressIn = () => Animated.timing(scale, { toValue: 0.98, duration: 120, useNativeDriver: true, easing: Easing.out(Easing.quad) }).start();
+  const onPressOut = () => Animated.timing(scale, { toValue: 1, duration: 160, useNativeDriver: true, easing: Easing.in(Easing.quad) }).start();
+
+  return (
+    <Animated.View style={{ flex: 1, transform: [{ scale }], marginHorizontal: 6 }}>
+      <TouchableOpacity activeOpacity={0.85} style={styles.richTouchable} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} accessibilityRole="button">
+        <View style={styles.richCard}>
+          <View style={styles.cardTextWrap}>
+            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardSubtitle}>{subtitle}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
@@ -89,15 +108,42 @@ const styles = StyleSheet.create({
   contentContainer: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    paddingVertical: 32,
+    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   primaryButton: { marginVertical: 16 },
   title: { fontSize: 28, color: COLORS.text, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
   subtitle: { fontSize: 16, color: COLORS.textSecondary, marginBottom: 20, textAlign: 'center' },
+  logo: { width: '60%', height: '60%', marginBottom: (0-30), marginTop: (0-50), alignSelf: 'center' },
   quickRow: { flexDirection: 'row', gap: 12, marginTop: 24, width: '100%' },
-  quickCard: { flex: 1, backgroundColor: COLORS.cardBackground, borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 2, borderColor: COLORS.secondary },
-  quickTitle: { fontSize: 16, fontWeight: '700', color: COLORS.text },
-  quickSubtitle: { fontSize: 12, color: COLORS.textSecondary },
+  richTouchable: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginHorizontal: 6,
+  },
+  richCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    height: 64,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#ffffff18',
+  },
+  cardIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  cardIcon: { width: 20, height: 20, tintColor: COLORS.textSecondary, opacity: 0.85 },
+  cardTextWrap: { flex: 1 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text, flexWrap: 'wrap' },
+  cardSubtitle: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2, flexWrap: 'wrap' },
 });

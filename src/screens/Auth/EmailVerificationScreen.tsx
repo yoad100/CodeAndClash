@@ -136,7 +136,7 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = o
                   color={
                     verificationStatus === 'success' ? COLORS.success :
                     verificationStatus === 'error' ? COLORS.error :
-                    COLORS.primary
+                    COLORS.primaryText
                   } 
                 />
               </View>
@@ -176,7 +176,7 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = o
           {isVerifying && (
             <View style={styles.statusContainer}>
               <View style={styles.statusCard}>
-                <Ionicons name="refresh" size={24} color={COLORS.primary} />
+                <Ionicons name="refresh" size={24} color={COLORS.primaryText} />
                 <Text style={styles.statusText}>
                   Verifying your email...
                 </Text>
@@ -223,13 +223,13 @@ export const EmailVerificationScreen: React.FC<EmailVerificationScreenProps> = o
             <Text style={styles.instructionsTitle}>What to do next:</Text>
             <View style={styles.instructionsList}>
               <View style={styles.instructionItem}>
-                <Ionicons name="mail-outline" size={20} color={COLORS.primary} />
+                <Ionicons name="mail-outline" size={20} color={COLORS.primaryText} />
                 <Text style={styles.instructionText}>
                   Check your email inbox for a message from CodeAndClash
                 </Text>
               </View>
               <View style={styles.instructionItem}>
-                <Ionicons name="link-outline" size={20} color={COLORS.primary} />
+                <Ionicons name="link-outline" size={20} color={COLORS.primaryText} />
                 <Text style={styles.instructionText}>
                   Click the verification link in the email
                 </Text>
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
   emailText: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: COLORS.primary,
+    color: COLORS.primaryText,
     marginLeft: 36,
     width: '100%',
     marginTop: 4,
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     fontSize: 16,
-    color: COLORS.primary,
+    color: COLORS.primaryText,
     fontWeight: '600',
   },
   helpContainer: {

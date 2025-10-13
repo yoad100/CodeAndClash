@@ -44,6 +44,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, onClose, actionLabe
       case 'warning':
         return COLORS.warning;
       default:
+        // Use a slightly lighter primary shade for toast backgrounds to increase contrast with text
         return COLORS.primary;
     }
   };

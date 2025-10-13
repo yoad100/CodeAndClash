@@ -7,7 +7,9 @@ import {
   Platform,
   ScrollView,
   TouchableOpacity,
+  Image,
 } from 'react-native';
+import { SmartImage } from '../../components/common/SmartImage';
 import { observer } from 'mobx-react-lite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -187,7 +189,11 @@ export const AuthScreen: React.FC = observer(() => {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <Text style={styles.title}>⚔️ CodeAndClash</Text>
+            <SmartImage
+              primary={() => require('../../../assets/Code&ClashLogo.png')}
+              style={styles.authLogo}
+              resizeMode="contain"
+            />
             <Text style={styles.subtitle}>
               {isLogin ? 'Welcome back!' : 'Create your account'}
             </Text>
@@ -246,6 +252,10 @@ export const AuthScreen: React.FC = observer(() => {
               secureTextEntry
             />
 
+            <TouchableOpacity onPress={() => navigation.navigate('ForgotPassword' as any)} style={{ alignSelf: 'flex-end', marginTop: 6 }}>
+              <Text style={{ color: COLORS.primaryText, fontWeight: '600' }}>Forgot password?</Text>
+            </TouchableOpacity>
+
             {!isLogin && (
               <Input
                 label="Confirm Password"
@@ -292,17 +302,18 @@ export const AuthScreen: React.FC = observer(() => {
               onPress={() => {
                 setIsLogin(!isLogin);
                 setErrors({});
-                // Clear confirm password when switching to login mode
                 if (!isLogin) {
                   setConfirmPassword('');
                 }
               }}
               style={styles.switchButton}
+              accessibilityRole="button"
             >
-              <Text style={styles.switchText}>
-                {isLogin
-                  ? "Don't have an account? Register"
-                  : 'Already have an account? Login'}
+              <Text style={styles.switchTextAlt}>
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                <Text style={styles.switchLink}>
+                  {isLogin ? 'Register' : 'Login'}
+                </Text>
               </Text>
             </TouchableOpacity>
           </View>
@@ -373,7 +384,22 @@ const styles = StyleSheet.create({
   },
   switchText: {
     fontSize: 14,
-    color: COLORS.primary,
+    color: COLORS.primaryText,
     fontWeight: '600',
+  },
+  switchTextAlt: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  switchLink: {
+    color: COLORS.primaryText,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  authLogo: {
+    width: 220,
+    height: 80,
+    marginBottom: 10,
   },
 });

@@ -1,6 +1,7 @@
 export const COLORS = {
   // Neon arcade palette
   primary: '#7C3AED',          // Neon purple
+  primaryText: '#D8B4FE',      // Higher-contrast lighter purple for text
   secondary: '#06B6D4',        // Cyber cyan
   success: '#22C55E',          // Neon green
   error: '#F43F5E',            // Hot pink-red

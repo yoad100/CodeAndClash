@@ -3,6 +3,7 @@ import { User } from '../models/user.model';
 import { Question } from '../models/question.model';
 import { calculateMatchRatings } from '../utils/elo';
 import { updateScore } from './leaderboard.redis';
+import { syncUserLevel } from './level.service';
 import logger from '../logger';
 
 export class MatchService {
@@ -144,6 +145,16 @@ export class MatchService {
     for (const update of updates) {
       await update.user.save();
       await updateScore(String(update.user._id), update.user.rating);
+
+      // Immediately sync user level after rating change; persist only if it actually changed
+      try {
+        const res = await syncUserLevel(update.user, { persist: true });
+        if (res && res.level) {
+          logger.info('User %s level sync result: %s (rank: %d of %d)', update.user.username, res.level.name, res.rank, res.totalPlayers);
+        }
+      } catch (err) {
+        logger.warn('Failed to sync user level for %s: %o', String(update.user._id), err);
+      }
     }
   }
 }
