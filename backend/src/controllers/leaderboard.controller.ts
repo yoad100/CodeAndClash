@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { User } from '../models/user.model';
 import { Match } from '../models/match.model';
 import { buildLevelBreakpoints, getLevelByRank } from '../services/level.service';
@@ -81,9 +82,14 @@ export const getTop = async (req: Request, res: Response) => {
   }
 
   const ids = agg.map((r: any) => r._id).filter(Boolean);
-  // Convert any ObjectId or other id types to string so mongoose can match them correctly
+  // Convert ids to strings and only keep valid ObjectId strings for the DB lookup.
+  // Aggregation _id may contain guest ids or other non-ObjectId values; passing
+  // those directly to mongoose.find({_id: {$in: ...}}) causes a CastError and can
+  // crash the request handler. We therefore filter to valid ObjectIds and
+  // safely map unmatched ids to Guest entries later.
   const objectIds = ids.map((id: any) => String(id));
-  const users = await User.find({ _id: { $in: objectIds } })
+  const validObjectIds = objectIds.filter((id) => mongoose.isValidObjectId(String(id)));
+  const users = await User.find({ _id: { $in: validObjectIds } })
     .select('username rating wins losses avatar levelName levelIndex levelKey')
     .lean();
 
@@ -105,6 +111,13 @@ export const getTop = async (req: Request, res: Response) => {
 export const getMyRank = async (req: Request, res: Response) => {
   const userId = (req as any).user?.sub;
   if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+  // Ensure the userId is a valid Mongo ObjectId before calling findById.
+  // Some clients may send guest ids or other identifiers that are not ObjectId strings
+  // — passing those directly to mongoose.findById will throw a CastError and could crash
+  // the request handler if uncaught. Validate early and return Unauthorized.
+  if (!mongoose.isValidObjectId(String(userId))) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
 
   const [count, my] = await Promise.all([
     User.countDocuments({}),

@@ -101,6 +101,13 @@ export class AuthStore {
           } catch (profileError) {
             console.warn('⚠️ Failed to fetch fresh profile after login:', profileError);
           }
+
+          // Also fetch leaderboard immediately so UI can compute nextRating/progress
+          try {
+            await this.rootStore.userStore.fetchLeaderboard();
+          } catch (lbErr) {
+            console.warn('⚠️ Failed to fetch leaderboard after login:', lbErr);
+          }
         }
 
         // Update match store player ID
@@ -172,6 +179,13 @@ export class AuthStore {
           } catch (profileError) {
             console.warn('⚠️ Failed to fetch fresh profile after registration:', profileError);
           }
+
+          // Fetch leaderboard so header can show accurate nextRating/progress right away
+          try {
+            await this.rootStore.userStore.fetchLeaderboard();
+          } catch (lbErr) {
+            console.warn('⚠️ Failed to fetch leaderboard after registration:', lbErr);
+          }
         }
 
         // Update match store player ID
@@ -230,6 +244,13 @@ export class AuthStore {
             await this.rootStore.userStore.fetchUserProfile();
           } catch (profileError) {
             console.warn('⚠️ Failed to fetch fresh profile after OAuth:', profileError);
+          }
+
+          // Fetch leaderboard to ensure nextRating/progress are available for the header
+          try {
+            await this.rootStore.userStore.fetchLeaderboard();
+          } catch (lbErr) {
+            console.warn('⚠️ Failed to fetch leaderboard after OAuth login:', lbErr);
           }
         }
 

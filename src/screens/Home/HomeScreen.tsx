@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image as RNImage, ScrollView, Animated, Easing, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image as RNImage, ScrollView, Animated, Easing, Dimensions, Platform } from 'react-native';
 import { SmartImage } from '../../components/common/SmartImage';
+import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { observer } from 'mobx-react-lite';
@@ -22,16 +23,24 @@ export const HomeScreen: React.FC = observer(() => {
 
   const navigation = useNavigation<HomeNavProp>();
   const [queued, setQueued] = useState(0);
+  const [logoLoaded, setLogoLoaded] = useState(false);
+  const [showSpinner, setShowSpinner] = useState(true);
 
   useEffect(() => {
     let mounted = true;
+    let minTimer: any = null;
     const refresh = async () => {
       const n = await socketService.getQueuedCount();
       if (mounted) setQueued(n);
     };
     refresh();
     const iv = setInterval(refresh, 3000);
-    return () => { mounted = false; clearInterval(iv); };
+    // Ensure we show spinner for at least 1s on first load, then hide it even if the image
+    // never fires onLoad (e.g. SmartImage returns null on web).
+    minTimer = setTimeout(() => {
+      if (mounted) setShowSpinner(false);
+    }, 1000);
+    return () => { mounted = false; clearInterval(iv); if (minTimer) clearTimeout(minTimer); };
   }, []);
 
   const startRandom = () => {
@@ -53,11 +62,23 @@ export const HomeScreen: React.FC = observer(() => {
         alwaysBounceVertical
         showsVerticalScrollIndicator={false}
       >
-        <SmartImage
-          primary={() => require('../../../assets/Code&ClashLogo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        {showSpinner ? (
+          <LoadingSpinner size="small" message="" />
+        ) : (
+          Platform.OS === 'web' ? (
+            <View style={[styles.logo, { justifyContent: 'center', alignItems: 'center' }]}>
+              <Text style={[styles.title, { fontSize: 32 }]}>Code & Clash</Text>
+            </View>
+          ) : (
+            <SmartImage
+              primary={() => require('../../../assets/Code&ClashLogo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              onLoad={() => { setLogoLoaded(true); /* keep spinner until min timeout elapses */ }}
+              onError={() => { setLogoLoaded(true); /* keep spinner until min timeout elapses */ }}
+            />
+          )
+        )}
         <Text style={styles.title}>Enter the Arena</Text>
         <Text style={styles.subtitle}>Challenge a rival and claim glory!</Text>
 

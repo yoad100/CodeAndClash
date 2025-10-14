@@ -5,6 +5,7 @@ import { calculateMatchRatings } from '../utils/elo';
 import { updateScore } from './leaderboard.redis';
 import { syncUserLevel } from './level.service';
 import logger from '../logger';
+import { safeFindById } from '../utils/dbHelpers';
 
 export class MatchService {
   async createMatch(playerIds: string[], subject?: string) {
@@ -20,9 +21,10 @@ export class MatchService {
       throw new Error('No questions available for the selected subject');
     }
     
-    // Get player usernames
-    const users = await User.find({ _id: { $in: playerIds } }).select('username');
-    const userMap = new Map(users.map(u => [String(u._id), u.username]));
+  // Get player usernames (filter-only valid object ids when querying DB)
+  const validPlayerIds = playerIds.filter((p) => typeof p === 'string');
+  const users = await User.find({ _id: { $in: validPlayerIds } }).select('username');
+  const userMap = new Map(users.map(u => [String(u._id), u.username]));
     
     const players = playerIds.map(id => ({
       userId: id,
@@ -106,9 +108,9 @@ export class MatchService {
     const updates = [];
     
     for (const player of players) {
-      if (!isObjectId(String(player.userId))) continue;
-      
-      const user = await User.findById(player.userId);
+  if (!isObjectId(String(player.userId))) continue;
+
+  const user = await safeFindById(User, player.userId);
       if (!user) continue;
       
       const isWinner = String(player.userId) === String(winnerId);

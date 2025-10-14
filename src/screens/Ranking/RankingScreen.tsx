@@ -206,14 +206,10 @@ export const RankingScreen: React.FC = observer(() => {
 
               <View style={styles.myRankRightCompact}>
                 <Text style={styles.myRatingValue}>{userStore.userRating}</Text>
+                <Text style={styles.myWL}>{(user?.wins ?? 0)}W / {(user?.losses ?? 0)}L</Text>
               </View>
             </View>
-
-            {/* compact stats row */}
-            <View style={styles.myRankStatsRow}>
-              <Text style={styles.myWL}>{(user?.wins ?? 0)}W / {(user?.losses ?? 0)}L</Text>
-              <Text style={styles.mySmallRating}>{/* placeholder for symmetry */}</Text>
-            </View>
+            
           </View>
         </View>
       )}
@@ -271,30 +267,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: COLORS.cardBackground,
-    borderRadius: 14,
-    borderWidth: 2,
+    borderRadius: 10,
+    borderWidth: 1,
     borderColor: COLORS.primary,
-    padding: 16,
-    marginHorizontal: 20,
-    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginHorizontal: 12,
+    marginBottom: 8,
     shadowColor: COLORS.primary,
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
   },
   myRankCardImproved: {
     flexDirection: 'row',
     alignItems: 'stretch',
     padding: 0,
     marginHorizontal: 8,
-    marginBottom: 8,
-    borderRadius: 4,
+    marginBottom: 6,
+    borderRadius: 6,
     overflow: 'hidden',
   },
   myRankBody: {
     flex: 1,
     backgroundColor: COLORS.cardBackground,
-    padding: 8,
+    padding: 6,
   },
   myRankTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   myRankInfo: { flex: 1 },
@@ -309,12 +306,12 @@ const styles = StyleSheet.create({
   myBadgeColumn: { flex: 1, alignItems: 'center' },
   myRankRight: { alignItems: 'flex-end', flex: 1 },
   myRankTitle: { color: COLORS.textSecondary, fontSize: 12, marginBottom: 4 },
-  myRankValue: { color: COLORS.text, fontSize: 24, fontWeight: '800' },
-  myRankValueCompact: { color: COLORS.text, fontSize: 22, fontWeight: '900' },
+  myRankValue: { color: COLORS.text, fontSize: 20, fontWeight: '800' },
+  myRankValueCompact: { color: COLORS.text, fontSize: 18, fontWeight: '900' },
   unrankedHint: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4 },
   myRatingLabel: { color: COLORS.textSecondary, fontSize: 12 },
-  myRatingValue: { color: COLORS.secondary, fontSize: 20, fontWeight: '700' },
-  myWL: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+  myRatingValue: { color: COLORS.secondary, fontSize: 16, fontWeight: '700' },
+  myWL: { color: COLORS.textSecondary, fontSize: 12, marginTop: 4, textAlign: 'right' },
   leftAccentBig: {
     width: 8,
     height: '100%',

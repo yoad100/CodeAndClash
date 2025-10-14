@@ -12,45 +12,54 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   message,
   size = 'large',
 }) => {
-  const spin = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const dotAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const spinAnim = Animated.loop(
-      Animated.timing(spin, {
-        toValue: 1,
-        duration: 4000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
     const pulseAnim = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
         Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
       ])
     );
-    spinAnim.start();
-    pulseAnim.start();
-    return () => {
-      spinAnim.stop();
-      pulseAnim.stop();
-    };
-  }, [spin, pulse]);
 
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
-  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1.12] });
-  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.75] });
+    const dots = Animated.loop(
+      Animated.timing(dotAnim, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true })
+    );
+
+    pulseAnim.start();
+    dots.start();
+    return () => {
+      pulseAnim.stop();
+      dots.stop();
+    };
+  }, [pulse, dotAnim]);
+
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.08] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0.72] });
+  const dotOffset = dotAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 8] });
+
+  const small = size === 'small';
+  const ringSize = small ? 80 : 160;
 
   return (
-    <View style={styles.container}>
-      <Animated.View style={[styles.ring, { transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
-      <AnimatedSmartImage
-        primary={() => require('../../../assets/Code&ClashLogo.png')}
-        style={[styles.logo, { transform: [{ rotate }] }]}
-        resizeMode="contain"
-      />
-      {message && <Text style={styles.message}>{message}</Text>}
+    <View style={[styles.container, small && styles.containerSmall]}>
+      <Animated.View style={[styles.ring, { width: ringSize, height: ringSize, borderRadius: ringSize / 2, transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
+      <Animated.View style={[styles.logoPlaceholder, { width: ringSize * 0.8, height: ringSize * 0.35 }]} />
+
+      <View style={styles.dotsRow}>
+        {[0, 1, 2].map((i) => (
+          <Animated.View
+            key={i}
+            style={[
+              styles.dot,
+              small && styles.dotSmall,
+              { opacity: 0.9, transform: [{ translateY: Animated.add(dotOffset, new Animated.Value(i * -4)) }] },
+            ]}
+          />
+        ))}
+      </View>
+      {message ? <Text style={styles.message}>{message}</Text> : null}
     </View>
   );
 };
@@ -82,5 +91,29 @@ const styles = StyleSheet.create({
     marginTop: 18,
     fontSize: 16,
     color: COLORS.textSecondary,
+  },
+  containerSmall: {
+    padding: 12,
+  },
+  logoPlaceholder: {
+    backgroundColor: COLORS.cardBackground,
+    borderRadius: 8,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: COLORS.secondary,
+    marginHorizontal: 4,
+  },
+  dotSmall: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
 });

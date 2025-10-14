@@ -3,6 +3,7 @@ import { Server as IOServer } from 'socket.io';
 import { Match } from './models/match.model';
 import { Question } from './models/question.model';
 import { User } from './models/user.model';
+import { safeFindById } from './utils/dbHelpers';
 import { updateScore } from './services/leaderboard.redis';
 import { calculateLevelAwareRatingDelta, DEFAULT_LEVEL, syncUserLevel } from './services/level.service';
 import jwt from 'jsonwebtoken';
@@ -41,7 +42,13 @@ async function loadUserLevelMetadata(userId?: string) {
   }
 
   try {
-    const doc = await User.findById(userId).select('avatar levelName levelKey levelIndex rating username levelUpdatedAt');
+    const doc = await safeFindById(User, userId);
+    if (doc) {
+      // ensure the selection shape matches the previous expectation
+      // (doc may be a mongoose document)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (doc as any).select?.('avatar levelName levelKey levelIndex rating username levelUpdatedAt');
+    }
     if (!doc) {
       return {
         avatar: undefined,
@@ -753,7 +760,7 @@ export function initSocket(server: HttpServer) {
         }
 
         const inviterId = String(socketUser.sub);
-        const inviter = await User.findById(inviterId);
+  const inviter = await safeFindById(User, inviterId);
         if (!inviter) {
           reply({ ok: false, error: 'Inviter account not found' });
           return;
@@ -882,8 +889,8 @@ export function initSocket(server: HttpServer) {
           return;
         }
 
-        const inviterUser = await User.findById(info.inviterId);
-        const targetUser = await User.findById(info.targetId);
+  const inviterUser = await safeFindById(User, info.inviterId);
+  const targetUser = await safeFindById(User, info.targetId);
         if (!inviterUser || !targetUser) {
           reply({ ok: false, error: 'Player data not available' });
           return;
@@ -948,7 +955,7 @@ export function initSocket(server: HttpServer) {
       // premium subject check
       if (subject !== 'any') {
         if (!uid) return socket.emit('error', { message: 'Premium matches require login' });
-        const u = await User.findById(uid);
+  const u = await safeFindById(User, uid);
         if (!u || !u.isPremium) return socket.emit('error', { message: 'Premium required for subject-specific matches' });
       }
   await enqueueRedis(subject, { socketId: socket.id, userId: uid, guestId: gid, username: uname });

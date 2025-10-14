@@ -184,20 +184,28 @@ const MainTabs: React.FC = observer(() => {
                     );
                   }
 
-                  // Normal rendering: use progress and next if available, otherwise fall back to buckets
-                  const finalNext = typeof next === 'number' && Number.isFinite(next)
-                    ? next
-                    : Math.ceil((Number.isFinite(rating) ? rating : 0) / 2000) * 2000 || 2000;
-                  const finalProgress = typeof progress === 'number' && Number.isFinite(progress)
+                  // Normal rendering: prefer authoritative next rating and progress from UserStore.
+                  // If we don't have a next cutoff (e.g. leaderboard not loaded), don't show an arbitrary
+                  // "/ 2000" denominator — instead display only the current rating and hide the progress fill.
+                  const hasNext = typeof next === 'number' && Number.isFinite(next);
+                  const finalNext = hasNext ? next : undefined;
+                  const finalProgress = (typeof progress === 'number' && Number.isFinite(progress))
                     ? progress
-                    : (Number.isFinite(rating) ? Math.max(0, Math.min(1, rating / finalNext)) : 0);
+                    : (hasNext && Number.isFinite(rating) ? Math.max(0, Math.min(1, rating / (finalNext as number))) : undefined);
 
                   return (
                     <View style={headerStyles.ratingInner}>
                       <View style={headerStyles.ratingBarBackground}>
-                        <View style={[headerStyles.ratingBarFill, { width: `${finalProgress * 100}%`, backgroundColor: COLORS.secondary }]} />
+                        {/* Only show fill when we have a sensible progress value */}
+                        {typeof finalProgress === 'number' ? (
+                          <View style={[headerStyles.ratingBarFill, { width: `${finalProgress * 100}%`, backgroundColor: COLORS.secondary }]} />
+                        ) : null}
                       </View>
-                      <Text style={headerStyles.ratingText}>{`${displayCurrent} / ${finalNext}`}</Text>
+                      <Text style={headerStyles.ratingText}>
+                        {typeof displayCurrent === 'number' || Number.isFinite(Number(displayCurrent))
+                          ? (finalNext ? `${displayCurrent} / ${finalNext}` : `${displayCurrent}`)
+                          : '—'}
+                      </Text>
                     </View>
                   );
                 })()}

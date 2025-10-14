@@ -17,7 +17,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'master',
     name: 'Master',
-  gradient: ['#fff7d6', '#fde047', '#fb923c', '#ea580c'] as const,
+    gradient: ['#fff7d6', '#fde047', '#fb923c', '#ea580c'] as const,
     border: 'rgba(250,204,21,0.9)',
     glow: 'rgba(250,204,21,0.55)',
     text: '#2b1102',
@@ -30,7 +30,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'guru',
     name: 'Guru',
-  gradient: ['#ede9fe', '#c4b5fd', '#8b5cf6', '#7c3aed'] as const,
+    gradient: ['#ede9fe', '#c4b5fd', '#8b5cf6', '#7c3aed'] as const,
     border: 'rgba(139,92,246,0.85)',
     glow: 'rgba(124,58,237,0.55)',
     text: '#1e0b4b',
@@ -43,7 +43,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'distinguished',
     name: 'Distinguished',
-  gradient: ['#e0f2fe', '#93c5fd', '#60a5fa', '#2563eb'] as const,
+    gradient: ['#e0f2fe', '#93c5fd', '#60a5fa', '#2563eb'] as const,
     border: 'rgba(59,130,246,0.75)',
     glow: 'rgba(37,99,235,0.45)',
     text: '#0b1b3f',
@@ -56,7 +56,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'staff',
     name: 'Staff',
-  gradient: ['#bbf7d0', '#6ee7b7', '#34d399', '#059669'] as const,
+    gradient: ['#bbf7d0', '#6ee7b7', '#34d399', '#059669'] as const,
     border: 'rgba(16,185,129,0.75)',
     glow: 'rgba(5,150,105,0.45)',
     text: '#023021',
@@ -69,7 +69,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'principal',
     name: 'Principal',
-  gradient: ['#fbcfe8', '#f472b6', '#ec4899', '#db2777'] as const,
+    gradient: ['#fbcfe8', '#f472b6', '#ec4899', '#db2777'] as const,
     border: 'rgba(236,72,153,0.75)',
     glow: 'rgba(219,39,119,0.45)',
     text: '#3f071f',
@@ -82,7 +82,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'architect',
     name: 'Architect',
-  gradient: ['#ecfeff', '#99f6e4', '#5eead4', '#0ea5a4'] as const,
+    gradient: ['#ecfeff', '#99f6e4', '#5eead4', '#0ea5a4'] as const,
     border: 'rgba(14,165,164,0.78)',
     glow: 'rgba(14,165,164,0.42)',
     text: '#053230',
@@ -95,20 +95,21 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'expert',
     name: 'Expert',
-  gradient: ['#ecfeff', '#bbf7d0', '#67e8f9', '#0ea5a4'] as const,
-    border: 'rgba(6,182,212,0.82)',
-    glow: 'rgba(6,182,212,0.38)',
-    text: '#06282b',
-    shimmer: 'rgba(217,249,249,0.78)',
-    accent: 'rgba(6,182,212,0.62)',
+    // Yellow / gold palette for Expert
+    gradient: ['#fff7d6', '#fde68a', '#f59e0b', '#f97316'] as const,
+    border: 'rgba(245,158,11,0.9)',
+    glow: 'rgba(245,158,11,0.5)',
+    text: '#2b1206',
+    shimmer: 'rgba(255,244,214,0.95)',
+    accent: 'rgba(245,158,11,0.9)',
     icon: 'diamond',
-    particleColors: ['rgba(6,182,212,0.5)', 'rgba(125,255,226,0.42)', 'rgba(217,249,249,0.36)'],
-    beam: 'rgba(6,182,212,0.28)',
+    particleColors: ['rgba(250,204,21,0.75)', 'rgba(253,224,71,0.6)', 'rgba(255,255,255,0.5)'],
+    beam: 'rgba(250,204,21,0.34)',
   },
   {
     key: 'lead',
     name: 'Lead',
-  gradient: ['#fff7ed', '#fed7aa', '#fb923c', '#ea580c'] as const,
+    gradient: ['#fff7ed', '#fed7aa', '#fb923c', '#ea580c'] as const,
     border: 'rgba(245,158,11,0.65)',
     glow: 'rgba(217,119,6,0.35)',
     text: '#3b1d02',
@@ -121,7 +122,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'senior',
     name: 'Senior',
-  gradient: ['#fbfde7', '#eefcc7', '#d9f08a', '#5a8a16'] as const,
+    gradient: ['#fbfde7', '#eefcc7', '#d9f08a', '#5a8a16'] as const,
     border: 'rgba(90,138,22,0.72)',
     glow: 'rgba(90,138,22,0.36)',
     text: '#14320b',
@@ -134,7 +135,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'specialist',
     name: 'Specialist',
-  gradient: ['#fff5f6', '#ffdbe6', '#ff9bad', '#db2777'] as const,
+    gradient: ['#fff5f6', '#ffdbe6', '#ff9bad', '#db2777'] as const,
     border: 'rgba(219,39,119,0.72)',
     glow: 'rgba(219,39,119,0.36)',
     text: '#3b0427',
@@ -147,7 +148,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'mid',
     name: 'Mid-level',
-  gradient: ['#fef2f2', '#fee2e2', '#fca5a5', '#dc2626'] as const,
+    gradient: ['#fef2f2', '#fee2e2', '#fca5a5', '#dc2626'] as const,
     border: 'rgba(248,113,113,0.6)',
     glow: 'rgba(220,38,38,0.28)',
     text: '#470707',
@@ -160,7 +161,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'junior',
     name: 'Junior',
-  gradient: ['#f0f9ff', '#e0f2fe', '#7dd3fc', '#0284c7'] as const,
+    gradient: ['#f0f9ff', '#e0f2fe', '#7dd3fc', '#0284c7'] as const,
     border: 'rgba(56,189,248,0.55)',
     glow: 'rgba(2,132,199,0.26)',
     text: '#082f49',
@@ -173,7 +174,7 @@ const BASE_LEVELS: Array<Omit<LevelTheme, 'tier'>> = [
   {
     key: 'intern',
     name: 'Intern',
-  gradient: ['#f3f4f6', '#e2e8f0', '#cbd5f5', '#9ca3af'] as const,
+    gradient: ['#f3f4f6', '#e2e8f0', '#cbd5f5', '#9ca3af'] as const,
     border: 'rgba(148,163,184,0.55)',
     glow: 'rgba(148,163,184,0.25)',
     text: '#1f2937',

@@ -47,10 +47,12 @@ export const PremiumScreen: React.FC = observer(() => {
     async function load() {
       if (!userStore.isPremium) return;
       setLoadingAnalytics(true);
-      try {
+        try {
         const resp = await apiService.getMySubjectAnalytics();
         if (!mounted) return;
-        setAnalytics(resp.data || []);
+        // Support backend returning { data: [...] } or direct array
+        const payload = resp.data?.data ?? resp.data ?? [];
+        setAnalytics(payload);
       } catch (err) {
         console.warn('Failed to load analytics', err);
       } finally {
@@ -176,21 +178,45 @@ export const PremiumScreen: React.FC = observer(() => {
                 <View>
                   {(() => {
                     const knownMap = new Map(SUBJECTS.map(s => [String(s.id).toLowerCase(), s.name]));
-                    const grouped: Record<string, { correct: number; incorrect: number; rawNames: Set<string> }> = {};
+                    // Group by the raw subject string, but display a friendly name when available
+                    const grouped: Record<string, { correct: number; incorrect: number; raws: Set<string> }> = {};
                     for (const row of analytics) {
-                      const raw = String(row.subject || 'any');
+                      const raw = String(row.subject ?? 'unknown');
                       const keyLower = raw.toLowerCase();
-                      const mapped = knownMap.get(keyLower);
-                      const groupKey = mapped ? mapped : 'Other';
-                      if (!grouped[groupKey]) grouped[groupKey] = { correct: 0, incorrect: 0, rawNames: new Set() };
+                      // Use raw as grouping key so we preserve every distinct subject seen
+                      const groupKey = raw;
+                      if (!grouped[groupKey]) grouped[groupKey] = { correct: 0, incorrect: 0, raws: new Set() };
                       grouped[groupKey].correct += row.correct;
                       grouped[groupKey].incorrect += row.incorrect;
-                      if (!mapped) grouped[groupKey].rawNames.add(raw);
+                      grouped[groupKey].raws.add(raw);
                     }
-                    return Object.entries(grouped).map(([groupName, vals]) => {
-                      const rawList = Array.from(vals.rawNames).slice(0, 3).join(', ');
-                      const subtitle = groupName === 'Other' && rawList ? `Seen as: ${rawList}` : undefined;
-                      return <SubjectCard key={groupName} subjectName={groupName} subtitle={subtitle} correct={vals.correct} incorrect={vals.incorrect} />;
+
+                    const prettify = (s: string) => {
+                      if (!s) return s;
+                      const low = String(s).toLowerCase();
+                      // If it's a known subject id, return its friendly name
+                      const mapped = knownMap.get(low);
+                      if (mapped) return mapped;
+                      // Otherwise, convert common separators and capitalize words
+                      return String(s)
+                        .replace(/[_-]/g, ' ')
+                        .split(/\s+/)
+                        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                        .join(' ');
+                    };
+
+                    return Object.entries(grouped).map(([rawKey, vals]) => {
+                      const displayName = prettify(rawKey);
+                      // No generic "Any Subject" — show the raw key prettified (e.g., 'any' => 'Any')
+                      return (
+                        <SubjectCard
+                          key={rawKey}
+                          subjectName={displayName}
+                          subtitle={undefined}
+                          correct={vals.correct}
+                          incorrect={vals.incorrect}
+                        />
+                      );
                     });
                   })()}
                 </View>

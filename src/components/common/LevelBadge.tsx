@@ -19,7 +19,13 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
   const flame2 = React.useRef(new Animated.Value(0)).current;
   const flame3 = React.useRef(new Animated.Value(0)).current;
   const lightning = React.useRef(new Animated.Value(0)).current;
+  const lightning2 = React.useRef(new Animated.Value(0)).current;
+  const lightning3 = React.useRef(new Animated.Value(0)).current;
   const spark = React.useRef(new Animated.Value(0)).current;
+  const spark2 = React.useRef(new Animated.Value(0)).current;
+  const spark3 = React.useRef(new Animated.Value(0)).current;
+  const leaf1 = React.useRef(new Animated.Value(0)).current;
+  const leaf2 = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
     const shimmerAnim = Animated.loop(
@@ -64,25 +70,80 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
       ])
     );
 
-    // Lightning animation for Guru level
+    // Lightning animations for Guru level (refactored for realism and slower cadence)
     const lightningAnim = Animated.loop(
       Animated.sequence([
-        Animated.delay(2000),
-        Animated.timing(lightning, { toValue: 1, duration: 100, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(lightning, { toValue: 0, duration: 100, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(lightning, { toValue: 1, duration: 80, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(lightning, { toValue: 0, duration: 1500, easing: Easing.linear, useNativeDriver: true }),
+        Animated.delay(2200), // longer quiet period
+        // initial bright flash
+        Animated.timing(lightning, { toValue: 1, duration: 120, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(lightning, { toValue: 0, duration: 260, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        // short afterglow
+        Animated.delay(1600),
+      ])
+    );
+
+    const lightning2Anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(3000),
+        Animated.timing(lightning2, { toValue: 1, duration: 180, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(lightning2, { toValue: 0, duration: 360, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        Animated.delay(2200),
+      ])
+    );
+
+    const lightning3Anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(4200),
+        Animated.timing(lightning3, { toValue: 1, duration: 240, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(lightning3, { toValue: 0, duration: 480, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.delay(3000),
       ])
     );
 
     // Spark animation for high-tier levels
+    // Distinguished spark loops - slower, bigger, layered
     const sparkAnim = Animated.loop(
       Animated.sequence([
-        Animated.timing(spark, { toValue: 1, duration: 1500, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(spark, { toValue: 0, duration: 100, easing: Easing.linear, useNativeDriver: true }),
         Animated.delay(800),
+        Animated.timing(spark, { toValue: 1, duration: 1400, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(spark, { toValue: 0, duration: 400, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        Animated.delay(1000),
       ])
     );
+
+    const spark2Anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(1200),
+        Animated.timing(spark2, { toValue: 1, duration: 1600, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(spark2, { toValue: 0, duration: 500, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        Animated.delay(1100),
+      ])
+    );
+
+    const spark3Anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(2000),
+        Animated.timing(spark3, { toValue: 1, duration: 1800, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+        Animated.timing(spark3, { toValue: 0, duration: 600, easing: Easing.in(Easing.quad), useNativeDriver: true }),
+        Animated.delay(1400),
+      ])
+    );
+
+      // Staff leaves float more slowly and organically
+      const leaf1Anim = Animated.loop(
+        Animated.sequence([
+          Animated.timing(leaf1, { toValue: 1, duration: 8000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.timing(leaf1, { toValue: 0, duration: 8000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        ])
+      );
+
+      const leaf2Anim = Animated.loop(
+        Animated.sequence([
+          Animated.delay(1200),
+          Animated.timing(leaf2, { toValue: 1, duration: 9200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.timing(leaf2, { toValue: 0, duration: 9200, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        ])
+      );
 
     shimmerAnim.start();
     pulseAnim.start();
@@ -91,7 +152,13 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
     flame2Anim.start();
     flame3Anim.start();
     lightningAnim.start();
+    lightning2Anim.start();
+    lightning3Anim.start();
     sparkAnim.start();
+    spark2Anim.start();
+    spark3Anim.start();
+    leaf1Anim.start();
+    leaf2Anim.start();
 
     return () => {
       shimmerAnim.stop();
@@ -101,9 +168,15 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
       flame2Anim.stop();
       flame3Anim.stop();
       lightningAnim.stop();
+      lightning2Anim.stop();
+      lightning3Anim.stop();
       sparkAnim.stop();
+      spark2Anim.stop();
+      spark3Anim.stop();
+      leaf1Anim.stop();
+      leaf2Anim.stop();
     };
-  }, [orbit, pulse, shimmer, flame1, flame2, flame3, lightning, spark]);
+  }, [orbit, pulse, shimmer, flame1, flame2, flame3, lightning, lightning2, lightning3, spark, spark2, spark3, leaf1, leaf2]);
 
   const level = getLevelDisplay(levelName, levelKey);
   const strength = React.useMemo(() => (PLAYER_LEVELS_DESC.length - level.tier) / PLAYER_LEVELS_DESC.length, [level.tier]);
@@ -128,12 +201,31 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
 
   // Lightning animation for Guru
   const lightningOpacity = lightning.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const lightningScale = lightning.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.5] });
+  const lightningScale = lightning.interpolate({ inputRange: [0, 1], outputRange: [0.8, 2.8] });
+  const lightning2Opacity = lightning2.interpolate({ inputRange: [0, 1], outputRange: [0, 0.9] });
+  const lightning2Scale = lightning2.interpolate({ inputRange: [0, 1], outputRange: [0.6, 2.0] });
+  const lightning3Opacity = lightning3.interpolate({ inputRange: [0, 1], outputRange: [0, 0.85] });
+  const lightning3Scale = lightning3.interpolate({ inputRange: [0, 1], outputRange: [0.7, 3.2] });
 
   // Spark animation for Distinguished and high tiers
   const sparkOpacity = spark.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 1, 0] });
-  const sparkScale = spark.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1.5] });
+  const sparkScale = spark.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1.6] });
   const sparkRotate = spark.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+  const spark2Opacity = spark2.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const spark2Scale = spark2.interpolate({ inputRange: [0, 1], outputRange: [0.7, 2.2] });
+  const spark3Opacity = spark3.interpolate({ inputRange: [0, 1], outputRange: [0, 0.95] });
+  const spark3Scale = spark3.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.8] });
+
+  // Leaves for Staff
+  const leaf1Y = leaf1.interpolate({ inputRange: [0, 1], outputRange: [0, -26] });
+  const leaf1X = leaf1.interpolate({ inputRange: [0, 1], outputRange: [0, 12] });
+  const leaf1Rot = leaf1.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '16deg'] });
+  const leaf1Opacity = leaf1.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0.6, 1, 0.6] });
+
+  const leaf2Y = leaf2.interpolate({ inputRange: [0, 1], outputRange: [0, -20] });
+  const leaf2X = leaf2.interpolate({ inputRange: [0, 1], outputRange: [0, -14] });
+  const leaf2Rot = leaf2.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-12deg'] });
+  const leaf2Opacity = leaf2.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.5, 1, 0.6] });
   // Negative rotations for spark usages (can't multiply string rotations)
   const sparkRotateNeg = spark.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-180deg'] });
   const sparkRotateNeg15 = spark.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-270deg'] });
@@ -249,31 +341,53 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
       {/* Guru Level - Lightning */}
       {level.key === 'guru' && (
         <>
+          {/* primary large flash */}
           <Animated.View
             style={[
               styles.lightning,
               {
-                top: compact ? -8 : -10,
-                left: '20%',
+                top: compact ? -12 : -14,
+                left: '18%',
                 opacity: lightningOpacity,
                 transform: [{ scale: lightningScale }],
               },
             ]}
           >
-            <Ionicons name="flash" size={compact ? 14 : 18} color="#c4b5fd" />
+            {/* pale lavender core to match Guru gradient */}
+            <Ionicons name="flash" size={compact ? 18 : 26} color="#f3e8ff" />
+            <Ionicons name="flash" size={compact ? 14 : 18} color="#a78bfa" style={{ position: 'absolute', left: 2, top: 2, opacity: 0.95 }} />
           </Animated.View>
+
+          {/* secondary mid flash, slightly delayed and rotated for depth */}
           <Animated.View
             style={[
               styles.lightning,
               {
-                bottom: compact ? -8 : -10,
-                right: '20%',
-                opacity: Animated.multiply(lightningOpacity, 0.8),
-                transform: [{ scale: lightningScale }, { rotate: '180deg' }],
+                top: compact ? -6 : -8,
+                right: '22%',
+                opacity: lightning2Opacity,
+                transform: [{ scale: lightning2Scale }, { rotate: '12deg' }],
               },
             ]}
           >
-            <Ionicons name="flash" size={compact ? 12 : 16} color="#8b5cf6" />
+            <Ionicons name="flash" size={compact ? 14 : 20} color="#efe7ff" />
+            <Ionicons name="flash" size={compact ? 10 : 14} color="#7c3aed" style={{ position: 'absolute', left: 1, top: 1, opacity: 0.9 }} />
+          </Animated.View>
+
+          {/* tertiary distant flash for slow afterglow */}
+          <Animated.View
+            style={[
+              styles.lightning,
+              {
+                bottom: compact ? -10 : -12,
+                left: '8%',
+                opacity: lightning3Opacity,
+                transform: [{ scale: lightning3Scale }, { rotate: '-22deg' }],
+              },
+            ]}
+          >
+            <Ionicons name="flash" size={compact ? 12 : 18} color="#f7f0ff" />
+            <Ionicons name="flash" size={compact ? 9 : 12} color="#7c3aed" style={{ position: 'absolute', left: 1, top: 1, opacity: 0.85 }} />
           </Animated.View>
         </>
       )}
@@ -287,12 +401,42 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
               {
                 top: compact ? -6 : -8,
                 right: '15%',
-                opacity: sparkOpacity,
-                transform: [{ scale: sparkScale }, { rotate: sparkRotate }],
+                opacity: Animated.add(sparkOpacity, 0.15),
+                transform: [{ scale: Animated.multiply(sparkScale, 1.25) }, { rotate: sparkRotate }],
               },
             ]}
           >
-            <Ionicons name="sparkles" size={compact ? 12 : 16} color="#93c5fd" />
+            <Ionicons name="sparkles" size={compact ? 14 : 20} color="#bfdbfe" />
+            <Ionicons name="sparkles" size={compact ? 10 : 14} color="#60a5fa" style={{ position: 'absolute', left: 2, top: 2, opacity: 0.9 }} />
+          </Animated.View>
+          {/* layered additional spark */}
+          <Animated.View
+            style={[
+              styles.spark,
+              {
+                top: compact ? -10 : -12,
+                left: '10%',
+                opacity: Animated.multiply(spark2Opacity, 0.9),
+                transform: [{ scale: Animated.multiply(spark2Scale, 1.15) }, { rotate: sparkRotateNeg }],
+              },
+            ]}
+          >
+            <Ionicons name="sparkles" size={compact ? 12 : 18} color="#e0f2fe" />
+            <Ionicons name="sparkles" size={compact ? 9 : 12} color="#93c5fd" style={{ position: 'absolute', left: 1, top: 1, opacity: 0.88 }} />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.spark,
+              {
+                bottom: compact ? -10 : -12,
+                right: '6%',
+                opacity: Animated.multiply(spark3Opacity, 0.85),
+                transform: [{ scale: Animated.multiply(spark3Scale, 1.05) }, { rotate: sparkRotate }],
+              },
+            ]}
+          >
+            <Ionicons name="star" size={compact ? 10 : 14} color="#bfdbfe" />
+            <Ionicons name="star" size={compact ? 7 : 10} color="#60a5fa" style={{ position: 'absolute', left: 1, top: 1, opacity: 0.9 }} />
           </Animated.View>
           <Animated.View
             style={[
@@ -300,12 +444,13 @@ export const LevelBadge: React.FC<LevelBadgeProps> = ({ levelName, levelKey, com
               {
                 bottom: compact ? -6 : -8,
                 left: '15%',
-                opacity: Animated.multiply(sparkOpacity, 0.7),
-                transform: [{ scale: sparkScale }, { rotate: sparkRotate }],
+                opacity: Animated.add(Animated.multiply(sparkOpacity, 0.85), 0.05),
+                transform: [{ scale: Animated.multiply(sparkScale, 1.1) }, { rotate: sparkRotate }],
               },
             ]}
           >
-            <Ionicons name="star" size={compact ? 10 : 14} color="#60a5fa" />
+            <Ionicons name="star" size={compact ? 12 : 16} color="#60a5fa" />
+            <Ionicons name="star" size={compact ? 8 : 12} color="#93c5fd" style={{ position: 'absolute', left: 1, top: 1, opacity: 0.9 }} />
           </Animated.View>
         </>
       )}
