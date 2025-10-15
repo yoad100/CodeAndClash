@@ -273,15 +273,21 @@ export function calculateLevelAwareRatingDelta(
   winnerLevelIndex: number | undefined,
   loserLevelIndex: number | undefined
 ): number {
+  // If we don't know levels, give a small default reward
   if (winnerLevelIndex == null || loserLevelIndex == null) {
     return 2;
   }
+  // Reward equals the gap between levels (absolute difference).
+  // Example: Intern(index=12) beats Master(index=0) -> gap=12 -> reward=12.
   const gap = Math.abs(winnerLevelIndex - loserLevelIndex);
+  // If same level, keep a small default reward
   if (gap === 0) return 2;
-  if (winnerLevelIndex > loserLevelIndex) {
-    return gap + 1;
+  // If winner is a higher tier (smaller index) beating a lower-tier opponent, give small reward
+  if (winnerLevelIndex < loserLevelIndex) {
+    return 1;
   }
-  return Math.max(1, Math.round(gap / 2));
+  // Otherwise (lower-tier beating higher-tier), reward equals the gap
+  return gap;
 }
 
 export async function computeLevelForRating(rating: number): Promise<LevelComputationResult> {

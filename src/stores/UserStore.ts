@@ -142,6 +142,11 @@ export class UserStore {
    */
   get nextRating(): number | undefined {
     try {
+      // Prefer server-provided value when available; this helps immediately show the
+      // correct denominator after a level-up without waiting for leaderboard fetch.
+      if (this.user && typeof this.user.nextRating === 'number' && Number.isFinite(this.user.nextRating)) {
+        return this.user.nextRating;
+      }
       const leaderboard = this.leaderboard || [];
       const totalPlayers = leaderboard.length;
       if (totalPlayers <= 0) return undefined;
@@ -165,7 +170,7 @@ export class UserStore {
       const nextTierLastRank = breakpoints[nextTierIndex];
       // leaderboard is ordered by rank ascending; attempt direct index
       const candidate = leaderboard[nextTierLastRank - 1] || leaderboard.find((e) => e.rank === nextTierLastRank);
-      if (candidate && typeof candidate.rating === 'number') return candidate.rating;
+  if (candidate && typeof candidate.rating === 'number') return candidate.rating + 1;
       return undefined;
     } catch (err) {
       if (process?.env?.NODE_ENV === 'development') console.warn('UserStore.nextRating compute failed', err);

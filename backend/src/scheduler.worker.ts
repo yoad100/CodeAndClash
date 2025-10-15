@@ -5,6 +5,7 @@ import { fetchDueJobs } from './services/scheduler.redis';
 import logger from './logger';
 import { connectDB, disconnectDB } from './db';
 import { recalculateAllUserLevels } from './services/level.service';
+import compactOldMatches from './tools/compact-old-matches';
 
 async function poll() {
   try {
@@ -56,13 +57,22 @@ async function bootstrap() {
   }
 
   // start immediately
-  poll().catch((e) => logger.error(e));
+  poll().catch((e: any) => logger.error(e));
 
   // kick off level refresh on boot and set daily interval
-  runLevelRefresh().catch((e) => logger.error(e));
+  runLevelRefresh().catch((e: any) => logger.error(e));
   levelInterval = setInterval(() => {
-    runLevelRefresh().catch((e) => logger.error(e));
+    runLevelRefresh().catch((e: any) => logger.error(e));
   }, DAY_MS);
+
+  // schedule compaction job once per day (offset by 5 minutes to avoid thundering with other jobs)
+  setTimeout(() => {
+    // run immediately then set daily interval
+    compactOldMatches().catch((e: any) => logger.error('compactOldMatches failed: %o', e));
+    setInterval(() => {
+      compactOldMatches().catch((e: any) => logger.error('compactOldMatches failed: %o', e));
+    }, DAY_MS);
+  }, 5 * 60 * 1000);
 }
 
 bootstrap().catch((err) => logger.error('Scheduler bootstrap error %o', err));

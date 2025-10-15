@@ -50,7 +50,9 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
         if (nextTierLastRank && nextTierLastRank > 0 && totalPlayers >= nextTierLastRank) {
           const cutoff = await User.find({}).sort({ rating: -1, updatedAt: 1 }).skip(Math.max(0, nextTierLastRank - 1)).limit(1).select('rating').lean();
           if (Array.isArray(cutoff) && cutoff.length > 0 && typeof cutoff[0].rating === 'number') {
-            nextRating = cutoff[0].rating;
+            // To promote into the next tier, the player needs to strictly exceed
+            // the lowest rating currently in that tier. Use lowest + 1 as the cutoff.
+            nextRating = cutoff[0].rating + 1;
           }
         }
       }
@@ -101,6 +103,9 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
     try {
       const userId = req.user?.sub as string | undefined;
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+      const user = await safeFindById(User, userId);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      if (!user.isPremium) return res.status(403).json({ message: 'Premium required to access question analytics' });
 
       // Aggregate matches where the match finished and the answers array contains entries for this user.
       // Use $toString to compare ids so we handle both ObjectId and string stored ids.

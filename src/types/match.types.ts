@@ -22,6 +22,8 @@ export interface Match {
   id: string;
   players: MatchPlayer[];
   questions: Question[];
+  // Optional detailed answer history recorded during the match
+  answers?: Array<{ playerId: string; questionIndex: number; answerIndex: number; correct: boolean; timeMs?: number }>;
   status: 'pending' | 'active' | 'inprogress' | 'ended';
   winnerId?: string;
 }

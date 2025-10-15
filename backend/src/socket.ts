@@ -12,7 +12,7 @@ import { scheduleJob, cancelJobs } from './services/scheduler.redis';
 import { createMatchState, getMatchState, updateMatchState, deleteMatchState } from './services/match.redis';
 import { findOpponentSchema, submitAnswerSchema, createPrivateMatchSchema, joinPrivateMatchSchema, invitePlayerSchema, respondInviteSchema } from './validation/socket.schemas';
 import { emitSocketError } from './utils/socketError';
-import { setSocketUser, deleteSocketUser, getUserSockets } from './services/socketmap.redis';
+import { setSocketUser, deleteSocketUser, getUserSockets, setSingleSocketUser } from './services/socketmap.redis';
 import { eloRatingChange } from './utils/elo';
 import { createAdapter } from '@socket.io/redis-adapter';
 import logger from './logger';
@@ -262,7 +262,7 @@ async function removeFromAllQueues(match: { socketId: string; userId?: string; g
   } catch {}
 }
 
-async function endMatch(match: any, io: any, forcedWinnerId?: string) {
+async function endMatch(match: any, io: any, forcedWinnerId?: string, options?: { forfeitLoserId?: string }) {
   const scores: Record<string, number> = {};
   match.players.forEach((p: any) => { scores[String(p.userId)] = p.score || 0; });
   const playerIds = match.players.map((p: any) => String(p.userId));
@@ -293,7 +293,7 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
   let ratingDelta = 0;
   let loserId: string | null = null;
 
-  if (winnerId && realPlayerIds.length === 2) {
+  if (winnerId) {
     loserId = realPlayerIds.find((id) => id !== String(winnerId)) || null;
     const winnerDoc = userMap.get(String(winnerId));
     const loserDoc = loserId ? userMap.get(loserId) : undefined;
@@ -302,8 +302,12 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
         typeof winnerDoc.levelIndex === 'number' ? winnerDoc.levelIndex : undefined,
         typeof loserDoc.levelIndex === 'number' ? loserDoc.levelIndex : undefined
       );
-    } else {
+    } else if (winnerDoc) {
+      // Opponent is not a registered user (guest) or their doc is missing: give a small default reward
       ratingDelta = 2;
+    } else {
+      // Winner isn't a registered user — no rating change possible
+      ratingDelta = 0;
     }
   }
 
@@ -323,6 +327,11 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
       if (ratingDelta > 0) {
         doc.rating = Math.max(100, (doc.rating || 1000) - ratingDelta);
       }
+    } else if (options && options.forfeitLoserId && String(playerId) === String(options.forfeitLoserId)) {
+      // Apply extra penalty for forfeits: reduce rating by an extra 1 (minimum 100)
+      doc.losses = (doc.losses || 0) + 1;
+      const penalty = 1;
+      doc.rating = Math.max(100, (doc.rating || 1000) - penalty);
     } else {
       // Draw or unresolved winner
       doc.losses = doc.losses || 0;
@@ -341,6 +350,8 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
     p.levelName = level.name;
     p.levelKey = level.key;
     p.levelIndex = level.index;
+    // Expose updated rating so clients can refresh header immediately
+    try { p.rating = typeof doc.rating === 'number' ? doc.rating : p.rating; } catch {}
   }
 
   try {
@@ -364,6 +375,7 @@ async function endMatch(match: any, io: any, forcedWinnerId?: string) {
     levelName: p.levelName || DEFAULT_LEVEL.name,
     levelKey: p.levelKey || DEFAULT_LEVEL.key,
     levelIndex: typeof p.levelIndex === 'number' ? p.levelIndex : DEFAULT_LEVEL.index,
+    rating: typeof p.rating === 'number' ? p.rating : undefined,
   }));
   io.to(`match:${match._id}`).emit('matchEnded', { matchId: String(match._id), winnerId: winnerId ? String(winnerId) : null, players: normPlayers });
   
@@ -664,7 +676,50 @@ export function initSocket(server: HttpServer) {
       socketUser = { sub: gid, username: socketUser?.username || 'Guest' };
     }
     // persist mapping for cross-instance lookup
-    if (socketUser?.sub) setSocketUser(socket.id, String(socketUser.sub)).catch(() => {});
+    if (socketUser?.sub) {
+      (async () => {
+        try {
+          const uid = String(socketUser.sub);
+          // Atomically claim this socket as the single active socket for the user.
+          // setSingleSocketUser will add this socket to the user's set and return the previous sockets.
+          const prev = await setSingleSocketUser(socket.id, uid).catch(() => []);
+          for (const sid of prev || []) {
+            if (!sid || sid === socket.id) continue;
+            try {
+              // Try to fetch the socket locally
+              const s = io.sockets.sockets.get(sid);
+              if (s) {
+                try {
+                  // Notify previous client that they were logged out due to another login
+                  try { s.emit('forceLogout', { reason: 'CONCURRENT_LOGIN', message: 'You were signed out because your account signed in on another device.' }); } catch {}
+                  if (typeof s.disconnect === 'function') {
+                    try { s.disconnect(true); } catch {}
+                  }
+                } catch {}
+              } else {
+                // Socket not present on this instance: attempt to notify/disconnect via adapter so remote instances also drop it
+                try {
+                  try { (global as any).__io?.to(sid).emit('forceLogout', { reason: 'CONCURRENT_LOGIN', message: 'You were signed out because your account signed in on another device.' }); } catch {}
+                } catch {}
+                try {
+                  // adapter.remoteDisconnect is provided by the redis adapter in socket.io v4
+                  const adapter: any = (io as any).of && (io as any).of('/').adapter;
+                  if (adapter && typeof adapter.remoteDisconnect === 'function') {
+                    try { await adapter.remoteDisconnect(sid, true); } catch (e) {
+                      // ignore adapter disconnect errors
+                    }
+                  }
+                } catch {}
+              }
+            } catch {}
+            // Remove the old mapping for the previous socket id only
+            try { await deleteSocketUser(sid); } catch {}
+          }
+        } catch (e) {}
+        // ensure our mapping is present (best-effort)
+        try { await setSocketUser(socket.id, String(socketUser.sub)); } catch {}
+      })();
+    }
 
     // If this user is already in a match, ensure this new socket joins the match room
     (async () => {
@@ -697,6 +752,13 @@ export function initSocket(server: HttpServer) {
     socket.on('createPrivateMatch', async (data: any) => {
   const parsed = createPrivateMatchSchema.safeParse(data || {});
   if (!parsed.success) return emitSocketError(socket, 'INVALID_PAYLOAD', 'Invalid payload', parsed.error.errors);
+      // Only premium users may create private matches
+      if (!socketUser?.sub || !isObjectId(String(socketUser.sub))) {
+        return emitSocketError(socket, 'UNAUTHORIZED', 'Login required to create private matches');
+      }
+      const creator = await safeFindById(User, String(socketUser.sub));
+      if (!creator) return emitSocketError(socket, 'UNAUTHORIZED', 'Account not found');
+      if (!creator.isPremium) return emitSocketError(socket, 'PREMIUM_REQUIRED', 'Premium membership required to create private matches');
       const subject = parsed.data.subject || 'any';
       const code = Math.random().toString(36).slice(2, 8).toUpperCase();
       await redis.setex(`private:${code}`, 60 * 15, JSON.stringify({ socketId: socket.id, userId: socketUser?.sub, username: socketUser?.username, subject }));
@@ -778,11 +840,20 @@ export function initSocket(server: HttpServer) {
 
         const target = await User.findOne({ username: new RegExp(`^${usernameQuery}$`, 'i') });
         if (!target) {
+          logger.info('invitePlayer: target not found for username=%s (inviter=%s)', usernameQuery, inviterId);
           reply({ ok: false, error: 'Player not found' });
           return;
         }
         if (String(target._id) === inviterId) {
           reply({ ok: false, error: 'You cannot invite yourself' });
+          return;
+        }
+        // Require target to be premium for private invites (both sides must be premium)
+        if (!target.isPremium) {
+          logger.info('invitePlayer: target not premium username=%s targetId=%s inviter=%s', usernameQuery, String(target._id), inviterId);
+          const errMsg = 'Target player must be premium to receive private invites';
+          reply({ ok: false, error: errMsg });
+          try { socket.emit('privateInviteError', { message: errMsg }); } catch {}
           return;
         }
 
@@ -1201,12 +1272,14 @@ export function initSocket(server: HttpServer) {
               if (msState && (msState as any).questionEndAt) qEnd = (msState as any).questionEndAt;
             } catch {}
             const unfreezeTime = Math.min(now + 15000, qEnd);
+            // compute server-intended freeze seconds to avoid client-side clock/latency skew
+            const freezeSeconds = Math.max(1, Math.ceil((unfreezeTime - now) / 1000));
             // Inform clients about the freeze timing
-            io.to(`match:${match._id}`).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex, unfreezeTime });
+            io.to(`match:${match._id}`).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex, unfreezeTime, freezeSeconds });
             try {
               const participants: string[] = Array.isArray(ms.participants) ? ms.participants : [];
               for (const sid of participants) {
-                try { io.to(sid).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex, unfreezeTime }); } catch {}
+                try { io.to(sid).emit('answerResult', { matchId: String(match._id), playerId, correct: false, freeze: true, answerIndex, questionIndex, unfreezeTime, freezeSeconds }); } catch {}
               }
             } catch {}
             logger.info('answerResult emission completed');
@@ -1271,16 +1344,25 @@ export function initSocket(server: HttpServer) {
       try {
         const uid = socketUser?.sub ? String(socketUser.sub) : undefined;
         if (!uid) return;
-        const existingMatchId = await redis.get(`usermatch:${uid}`);
+        let existingMatchId = await redis.get(`usermatch:${uid}`);
+        // Fallback: try to infer matchId from socket rooms if redis mapping is missing
+        if (!existingMatchId) {
+          try {
+            const rooms = Array.from(socket.rooms || []);
+            // rooms include socket.id plus any joined rooms; match rooms are prefixed with 'match:'
+            const matchRoom = rooms.find((r) => typeof r === 'string' && r.startsWith('match:')) as string | undefined;
+            if (matchRoom) existingMatchId = matchRoom.replace(/^match:/, '');
+          } catch {}
+        }
         if (!existingMatchId) return;
         const match = await Match.findById(existingMatchId);
         if (!match || match.status === 'finished') return;
         const me = (match.players as any[]).find((p) => String(p.userId) === uid);
         const opp = (match.players as any[]).find((p) => String(p.userId) !== uid);
-        const oppId = opp ? String(opp.userId) : null;
+        const oppId = opp && opp.userId && isObjectId(String(opp.userId)) ? String(opp.userId) : undefined;
         // Notify the room that a player left so the remaining client can redirect
         try { io.to(`match:${match._id}`).emit('opponentLeft', { matchId: String(match._id) }); } catch {}
-        await endMatch(match, io, oppId || undefined);
+        await endMatch(match, io, oppId || undefined, { forfeitLoserId: uid });
       } catch (e) {
         logger.warn('leaveMatch handler error: %o', e);
       }
@@ -1349,16 +1431,28 @@ export function initSocket(server: HttpServer) {
           if (uid) {
             const existingMatchId = await redis.get(`usermatch:${uid}`);
             if (existingMatchId) {
-              const match = await Match.findById(existingMatchId);
-              if (match && match.status !== 'finished') {
-                const me = (match.players as any[]).find((p) => String(p.userId) === uid);
-                const opp = (match.players as any[]).find((p) => String(p.userId) !== uid);
-                const oppId = opp ? String(opp.userId) : null;
-                // Notify the room that a player left so the remaining client can redirect
-                try { io.to(`match:${match._id}`).emit('opponentLeft', { matchId: String(match._id) }); } catch {}
-                await endMatch(match, (global as any).__io, oppId || undefined);
+                  let match = await Match.findById(existingMatchId);
+                  // If match not found via usermatch mapping, try resolving from socket rooms of the disconnecting socket
+                  if (!match) {
+                    try {
+                      // socket may have joined a room `match:<id>`
+                      const rooms = Array.from((socket as any).rooms || []);
+                      const matchRoom = rooms.find((r: any) => typeof r === 'string' && r.startsWith('match:')) as string | undefined;
+                      if (matchRoom) {
+                        const fallbackId = matchRoom.replace(/^match:/, '');
+                        match = await Match.findById(fallbackId);
+                      }
+                    } catch {}
+                  }
+                if (match && match.status !== 'finished') {
+                  const me = (match.players as any[]).find((p) => String(p.userId) === uid);
+                  const opp = (match.players as any[]).find((p) => String(p.userId) !== uid);
+                  const oppId = opp && opp.userId && isObjectId(String(opp.userId)) ? String(opp.userId) : undefined;
+                  // Notify the room that a player left so the remaining client can redirect
+                  try { io.to(`match:${match._id}`).emit('opponentLeft', { matchId: String(match._id) }); } catch {}
+                  await endMatch(match, (global as any).__io, oppId || undefined, { forfeitLoserId: uid });
+                }
               }
-            }
           }
         } catch {}
       })();

@@ -10,6 +10,10 @@ export interface User {
   levelName?: string;
   levelKey?: string;
   levelIndex?: number;
+  // Optional server-provided helpers to show progress in the UI without requiring
+  // an immediate leaderboard refresh after level changes.
+  nextRating?: number;
+  progressToNextLevel?: number;
 }
 
 export interface LeaderboardEntry {

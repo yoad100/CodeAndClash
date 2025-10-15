@@ -126,21 +126,42 @@ export class MatchService {
       updates.push({ user, player, isWinner });
     }
     
-    // Calculate ELO rating changes for both players
+    // Calculate rating changes based on level-aware delta (gap rule)
     if (updates.length === 2) {
       const [update1, update2] = updates;
-      const ratingResult = calculateMatchRatings(
-        { rating: update1.user.rating || 1000, score: update1.player.score || 0 },
-        { rating: update2.user.rating || 1000, score: update2.player.score || 0 }
-      );
-      
-      update1.user.rating = ratingResult.playerA.newRating;
-      update2.user.rating = ratingResult.playerB.newRating;
-      
-      logger.info('Rating changes: %s (%d->%d) vs %s (%d->%d)', 
-        update1.user.username, ratingResult.playerA.oldRating, ratingResult.playerA.newRating,
-        update2.user.username, ratingResult.playerB.oldRating, ratingResult.playerB.newRating
-      );
+      try {
+        const winnerIdStr = winnerId ? String(winnerId) : null;
+        const uAIndex = typeof update1.user.levelIndex === 'number' ? update1.user.levelIndex : undefined;
+        const uBIndex = typeof update2.user.levelIndex === 'number' ? update2.user.levelIndex : undefined;
+        const winnerIsA = winnerIdStr && String(update1.user._id) === winnerIdStr;
+        let deltaA = 0;
+        let deltaB = 0;
+        if (winnerIsA) {
+          const d = require('./level.service').calculateLevelAwareRatingDelta(uAIndex, uBIndex);
+          deltaA = d;
+          deltaB = -d;
+        } else if (winnerIdStr) {
+          const d = require('./level.service').calculateLevelAwareRatingDelta(uBIndex, uAIndex);
+          deltaB = d;
+          deltaA = -d;
+        } else {
+          // draw: no rating change
+          deltaA = 0;
+          deltaB = 0;
+        }
+
+        const oldA = typeof update1.user.rating === 'number' ? update1.user.rating : 1000;
+        const oldB = typeof update2.user.rating === 'number' ? update2.user.rating : 1000;
+        update1.user.rating = Math.max(100, oldA + deltaA);
+        update2.user.rating = Math.max(100, oldB + deltaB);
+
+        logger.info('Rating changes (level-gap): %s (%d->%d) vs %s (%d->%d)',
+          update1.user.username, oldA, update1.user.rating,
+          update2.user.username, oldB, update2.user.rating
+        );
+      } catch (e) {
+        logger.warn('Failed to compute level-gap rating changes, falling back to no-op: %o', e);
+      }
     }
     
     // Save user updates and update leaderboard

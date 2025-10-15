@@ -346,6 +346,13 @@ export class MatchStore {
     const playerId = String(payload.playerId);
     
     runInAction(() => {
+      // Persist answer into currentMatch.answers so results can display question history
+      try {
+        if (this.currentMatch) {
+          if (!this.currentMatch.answers) this.currentMatch.answers = [];
+          this.currentMatch.answers.push({ playerId, questionIndex: payload.questionIndex, answerIndex: payload.answerIndex, correct: !!payload.correct, timeMs: (payload as any).timeMs || 0 });
+        }
+      } catch (e) {}
       if (payload.correct) {
         this.answeredQuestions.add(payload.questionIndex);
         if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('✅ Question resolved for index:', payload.questionIndex);
@@ -464,6 +471,14 @@ export class MatchStore {
             levelKey: matchPlayer.levelKey,
             levelIndex: typeof matchPlayer.levelIndex === 'number' ? matchPlayer.levelIndex : undefined,
           });
+          // Also update rating immediately if server provided it in payload
+          try {
+            if (typeof matchPlayer.rating === 'number') {
+              userStore.updateUser({ rating: matchPlayer.rating });
+            } else if (typeof matchPlayer.newRating === 'number') {
+              userStore.updateUser({ rating: matchPlayer.newRating });
+            }
+          } catch (e) {}
         }
       }
     } catch (error) {
@@ -815,9 +830,14 @@ export class MatchStore {
     }
 
     const now = Date.now();
-    const targetMs = typeof unfreezeTime === 'number' && unfreezeTime > now ? unfreezeTime : now + 15000;
-    const baseSeconds = Math.ceil((targetMs - now) / 1000);
-    const totalSeconds = Math.min(15, Math.max(1, baseSeconds));
+    // If server provided an explicit freezeSeconds, prefer it — this avoids client-side rounding/latency skew
+    const totalSeconds = typeof (unfreezeTime as any) === 'object' && (unfreezeTime as any).freezeSeconds
+      ? Math.min(15, Math.max(1, Number((unfreezeTime as any).freezeSeconds)))
+      : (() => {
+        const targetMs = typeof unfreezeTime === 'number' && unfreezeTime > now ? unfreezeTime : now + 15000;
+        const baseSeconds = Math.ceil((targetMs - now) / 1000);
+        return Math.min(15, Math.max(1, baseSeconds));
+      })();
 
     this.freezeCountdowns.set(playerId, totalSeconds);
     if (!this.freezeTotalDurations.has(playerId) || (this.freezeTotalDurations.get(playerId) ?? 0) < totalSeconds) {

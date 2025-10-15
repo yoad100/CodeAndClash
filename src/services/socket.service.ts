@@ -13,6 +13,7 @@ class SocketService {
   private socket: Socket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectDelay = 30000; // 30s
+  private reconnectTimer: any = null;
   private flushInProgress = false;
   private nextReconnectAt: number | null = null;
   private guestId: string | null = null;
@@ -26,6 +27,24 @@ class SocketService {
 
   setRootStore(root: any) {
     this.rootStoreRef = root;
+    try {
+      // Listen for matchEnded events and update the local user profile/rating immediately
+      this.on('matchEnded', (payload: any) => {
+        try {
+          const myId = this.rootStoreRef?.userStore?.user?.id || this.rootStoreRef?.authStore?.currentUser?.id;
+          if (!myId) return;
+          const players = (payload && payload.players) || [];
+          // Find updated entry for current user
+          const mine = players.find((p: any) => String(p.userId || p.id) === String(myId) || String(p.id) === String(myId));
+          if (mine && typeof mine.rating === 'number') {
+            this.rootStoreRef?.userStore?.updateUser({ rating: mine.rating });
+          } else if (mine && typeof mine.newRating === 'number') {
+            // Some payloads may include newRating
+            this.rootStoreRef?.userStore?.updateUser({ rating: mine.newRating });
+          }
+        } catch (e) {}
+      });
+    } catch (e) {}
   }
 
   private async ensureGuestId(): Promise<string> {
@@ -78,6 +97,18 @@ class SocketService {
     this.socket.on('connect', this.onConnect.bind(this));
     this.socket.on('disconnect', this.onDisconnect.bind(this));
     this.socket.on('connect_error', this.onConnectError.bind(this));
+    // handle server-forced logout due to concurrent sign-in
+    this.socket.on('forceLogout', (payload: any) => {
+      try {
+        const reason = payload?.reason || 'FORCED_LOGOUT';
+        // If authStore exposes forceLogout, use it; otherwise fall back to simple disconnect
+        if (this.rootStoreRef?.authStore?.forceLogout) {
+          try { this.rootStoreRef.authStore.forceLogout(reason); } catch {}
+        } else {
+          try { this.disconnect(); } catch {}
+        }
+      } catch (e) {}
+    });
     // handle server-emitted logical errors (not transport-level)
     this.socket.on('error', (payload: any) => {
       try {
@@ -120,8 +151,14 @@ class SocketService {
 
   disconnect() {
     if (!this.socket) return;
-    this.socket.disconnect();
+    try {
+      this.socket.disconnect();
+    } catch (e) {}
     this.socket = null;
+    // Cancel any scheduled reconnect to avoid reconnect loops after an intentional disconnect
+    try { if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; } } catch (e) {}
+    this.reconnectAttempts = 0;
+    this.nextReconnectAt = null;
     this.rootStoreRef?.uiStore?.setConnectionStatus?.('disconnected');
   }
 
@@ -187,7 +224,11 @@ class SocketService {
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
     this.nextReconnectAt = Date.now() + delay;
     try { console.debug('[socket] scheduleReconnect', { attempts: this.reconnectAttempts, delay }); } catch (e) {}
-    setTimeout(() => {
+    if (this.reconnectTimer) {
+      try { clearTimeout(this.reconnectTimer); } catch (e) {}
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (!this.socket) this.createSocket().then((s) => (this.socket = s));
       try {
         this.socket?.connect();

@@ -22,6 +22,7 @@ import { RootStackParamList } from '../../navigation/types';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/common/Button';
 import SubjectCard from '../../components/analytics/SubjectCard';
+import Svg, { Circle } from 'react-native-svg';
 import { apiService } from '../../services/api.service';
 
 type PremiumNavigationProp = StackNavigationProp<RootStackParamList>;
@@ -125,11 +126,11 @@ export const PremiumScreen: React.FC = observer(() => {
           <ArcadeButton
             title={userStore.isPremium ? 'Create Invite' : 'Upgrade to Unlock'}
             onPress={handleInviteFriend}
-            variant={userStore.isPremium ? 'primary' : 'ghost'}
+            variant={userStore.isPremium ? 'primary' : 'premium'}
             size="lg"
-            style={styles.inviteButton}
+            style={styles.inviteButton as any}
             iconLeft={userStore.isPremium ? <Ionicons name="people" size={20} color={COLORS.white} /> : undefined}
-            textStyle={userStore.isPremium ? styles.inviteButtonText : undefined}
+            textStyle={userStore.isPremium ? (styles.inviteButtonText as any) : (styles.upgradeButtonGoldText as any)}
           />
           {inviteStatusCopy && (
             <View style={styles.inviteStatusBox}>
@@ -165,10 +166,10 @@ export const PremiumScreen: React.FC = observer(() => {
         </View>
 
         {/* Analytics dashboard: boxed card below the subjects grid */}
-        {userStore.isPremium && (
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Your Subject Stats</Text>
-            {loadingAnalytics ? (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Your Subject Stats</Text>
+          {userStore.isPremium ? (
+            loadingAnalytics ? (
               <Text style={styles.sectionSubtitle}>Loading…</Text>
             ) : analytics.length === 0 ? (
               <Text style={styles.sectionSubtitle}>No data yet — play some matches to gather stats.</Text>
@@ -221,9 +222,69 @@ export const PremiumScreen: React.FC = observer(() => {
                   })()}
                 </View>
               </>
-            )}
-          </View>
-        )}
+            )
+          ) : (
+            // Teaser for non-premium users: small, tasteful preview + upgrade CTA
+            <>
+              <Text style={styles.sectionSubtitle}>
+                Unlock detailed subject analytics — see accuracy per topic, strengths and areas to improve.
+              </Text>
+              <View style={styles.teaserPreview}>
+                {SUBJECTS.slice(0, 3).map((s, idx) => {
+                  const demoPcts = [37, 15, 92];
+                  const pct = demoPcts[idx] ?? 0;
+                  const SIZE = 64;
+                  const STROKE = 6;
+                  const R = (SIZE - STROKE) / 2;
+                  const C = 2 * Math.PI * R;
+                  const dash = C * (1 - pct / 100);
+                  return (
+                    <View key={s.id} style={styles.teaserMiniWrap}>
+                      <Text style={styles.teaserIcon}>{s.icon}</Text>
+                      <Text style={styles.teaserName}>{s.name}</Text>
+                      <View style={styles.teaserMiniStat}>
+                        <Svg width={SIZE} height={SIZE}>
+                          <Circle
+                            cx={SIZE / 2}
+                            cy={SIZE / 2}
+                            r={R}
+                            stroke={COLORS.border}
+                            strokeWidth={STROKE}
+                            fill="transparent"
+                          />
+                          <Circle
+                            cx={SIZE / 2}
+                            cy={SIZE / 2}
+                            r={R}
+                            stroke={COLORS.primary}
+                            strokeWidth={STROKE}
+                            strokeLinecap="round"
+                            fill="transparent"
+                            strokeDasharray={`${C} ${C}`}
+                            strokeDashoffset={dash}
+                            transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
+                          />
+                        </Svg>
+                        <View style={styles.teaserPctLabel}><Text style={styles.teaserPctText}>{pct}%</Text></View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+              <View style={{ marginTop: 12 }}>
+                <ArcadeButton
+                  title="Upgrade to unlock"
+                  onPress={() => navigation.navigate('PremiumUpgrade')}
+                  variant="premium"
+                  size="md"
+                  style={styles.upgradeButton}
+                  textStyle={styles.upgradeButtonGoldText as any}
+                />
+              </View>
+              <Text style={styles.teaserNote}>Preview only — real stats appear after upgrading and playing matches.</Text>
+            </>
+          )}
+        </View>
       </ScrollView>
 
       <Modal
@@ -329,6 +390,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    //weird margin offset in mobile view
     marginTop: (0-50),
   },
   scrollContent: {
@@ -380,7 +442,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginBottom: 12,
+    marginBottom: 45,
     justifyContent: 'center',
   },
   subjectCard: {
@@ -451,6 +513,30 @@ const styles = StyleSheet.create({
   },
   inviteButton: {
     width: '100%',
+  },
+  upgradeButtonGold: {
+    width: '100%',
+    backgroundColor: '#D4AF37',
+    borderWidth: 0,
+    paddingVertical: 14,
+    borderRadius: 14,
+    shadowColor: '#FFD54F',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  upgradeButtonGoldText: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#2B1B00',
+    textShadowColor: 'rgba(255, 223, 99, 0.9)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+    letterSpacing: 0.6,
   },
   inviteButtonText: {
     fontSize: 18,
@@ -589,8 +675,74 @@ const styles = StyleSheet.create({
     minHeight: 140,
     alignSelf: 'stretch',
   },
-  sectionCard: {
+  teaserPreview: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    alignItems: 'stretch',
+  },
+  teaserMiniWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginHorizontal: 6,
+  },
+  teaserMiniStat: {
     marginTop: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  teaserPctLabel: {
+    position: 'absolute',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  teaserPctText: {
+    position: 'absolute',
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  teaserCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  teaserIcon: {
+    fontSize: 28,
+    marginBottom: 6,
+  },
+  teaserName: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  teaserStatsPlaceholder: {
+    width: '100%',
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  teaserPct: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.06)'
+  },
+  teaserNote: {
+    marginTop: 8,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  sectionCard: {
+    marginTop: 28,
     backgroundColor: COLORS.cardBackground,
     borderRadius: 12,
     padding: 16,

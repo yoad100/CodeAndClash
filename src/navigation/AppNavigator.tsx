@@ -193,6 +193,9 @@ const MainTabs: React.FC = observer(() => {
                     ? progress
                     : (hasNext && Number.isFinite(rating) ? Math.max(0, Math.min(1, rating / (finalNext as number))) : undefined);
 
+                  const numericCurrent = typeof displayCurrent === 'number' ? displayCurrent : (Number.isFinite(Number(displayCurrent)) ? Number(displayCurrent) : NaN);
+                  const shouldShowDenom = typeof finalNext === 'number' && Number.isFinite(numericCurrent) && finalNext > numericCurrent;
+
                   return (
                     <View style={headerStyles.ratingInner}>
                       <View style={headerStyles.ratingBarBackground}>
@@ -202,9 +205,7 @@ const MainTabs: React.FC = observer(() => {
                         ) : null}
                       </View>
                       <Text style={headerStyles.ratingText}>
-                        {typeof displayCurrent === 'number' || Number.isFinite(Number(displayCurrent))
-                          ? (finalNext ? `${displayCurrent} / ${finalNext}` : `${displayCurrent}`)
-                          : '—'}
+                        {Number.isFinite(numericCurrent) ? (shouldShowDenom ? `${numericCurrent} / ${finalNext}` : `${numericCurrent}`) : '—'}
                       </Text>
                     </View>
                   );

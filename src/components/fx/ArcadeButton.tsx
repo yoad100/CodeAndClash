@@ -7,12 +7,12 @@ import { SwordClash } from './SwordClash';
 type ArcadeButtonProps = {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'ghost' | 'danger' | 'premium';
   size?: 'sm' | 'md' | 'lg';
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
-  style?: ViewStyle;
-  textStyle?: TextStyle;
+  style?: any;
+  textStyle?: any;
   showSwords?: boolean; // Enable sword clash animation
   isActive?: boolean; // Control animation state
   fullWidth?: boolean;
@@ -46,8 +46,10 @@ export const ArcadeButton: React.FC<ArcadeButtonProps> = ({
   React.useEffect(() => {
     if (variant !== 'primary') {
       neonPulse.setValue(0);
-      return;
     }
+
+    // start premium sheen/sparkle animation only for premium variant
+    // handled below in premiumPulse
 
     const loop = Animated.loop(
       Animated.sequence([
@@ -68,9 +70,27 @@ export const ArcadeButton: React.FC<ArcadeButtonProps> = ({
     return () => loop.stop();
   }, [neonPulse, variant]);
 
+  // Premium sheen animation
+  const premiumPulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    if (variant !== 'premium') {
+      premiumPulse.setValue(0);
+      return;
+    }
+    const pLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(premiumPulse, { toValue: 1, duration: 1400, useNativeDriver: false }),
+        Animated.timing(premiumPulse, { toValue: 0, duration: 1400, useNativeDriver: false }),
+      ])
+    );
+    pLoop.start();
+    return () => pLoop.stop();
+  }, [premiumPulse, variant]);
+
   const bg =
     variant === 'primary' ? { backgroundColor: COLORS.primary } :
     variant === 'danger' ? { backgroundColor: COLORS.error } :
+    variant === 'premium' ? { backgroundColor: 'transparent' } :
     { backgroundColor: 'transparent', borderWidth: 2, borderColor: COLORS.primary };
 
   const sz = size === 'sm' ? styles.sm : size === 'lg' ? styles.lg : styles.md;
@@ -88,6 +108,7 @@ export const ArcadeButton: React.FC<ArcadeButtonProps> = ({
 
   const neonGlow = neonPulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.85] });
   const neonSheen = neonPulse.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0.8] });
+  const premiumSheen = premiumPulse.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.9] });
 
   return (
     <Pressable
@@ -142,6 +163,21 @@ export const ArcadeButton: React.FC<ArcadeButtonProps> = ({
                 },
               ]}
             />
+          </>
+        )}
+        {variant === 'premium' && (
+          <>
+            <LinearGradient
+              colors={['#ffd36b', '#f7c548', '#d4af37']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.gradient, { opacity: 1 }]}
+            />
+            {/* polish sheen removed per request; sparkles retained */}
+            {/* sparkles - three small pulsing dots */}
+            <Animated.View pointerEvents="none" style={[styles.sparkle, styles.sparkleA, { opacity: premiumSheen }]} />
+            <Animated.View pointerEvents="none" style={[styles.sparkle, styles.sparkleB, { opacity: premiumSheen.interpolate({ inputRange: [0,1], outputRange: [0,1] }) }]} />
+            <Animated.View pointerEvents="none" style={[styles.sparkle, styles.sparkleC, { opacity: premiumSheen.interpolate({ inputRange: [0,1], outputRange: [0.6,0.05] }) }]} />
           </>
         )}
         <View style={styles.innerContent}>
@@ -218,6 +254,37 @@ const styles = StyleSheet.create({
   gradient: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 18,
+  },
+  premiumSheen: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    transform: [{ rotate: '15deg' }],
+  },
+  sparkle: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 8,
+    backgroundColor: '#fff9e6',
+    shadowColor: '#fff9e6',
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
+  },
+  sparkleA: { top: 8, left: 16, transform: [{ scale: 1.1 }] },
+  sparkleB: { top: 6, right: 22, transform: [{ scale: 0.9 }] },
+  sparkleC: { bottom: 10, left: 24, transform: [{ scale: 0.8 }] },
+  premiumOverlay: {
+    position: 'absolute',
+    width: '120%',
+    height: '160%',
+    left: '-10%',
+    top: -40,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 6,
+    shadowColor: '#fff',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
   },
   swordWrap: {
     marginRight: 4,
